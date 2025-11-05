@@ -330,60 +330,120 @@ public class FileParsingService {
     public List<Pedido> parsePedidosFromBytes(byte[] content, List<Aeropuerto> aeropuertos) throws Exception {
         List<Pedido> pedidos = new ArrayList<>();
         Map<String, Aeropuerto> mapaAeropuertos = createAeropuertosMap(aeropuertos);
-        
+
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(new ByteArrayInputStream(content), StandardCharsets.UTF_8))) {
-            
+
             String linea;
             int lineNumber = 0;
-            
+
             while ((linea = reader.readLine()) != null) {
                 lineNumber++;
-                
+
                 if (linea.trim().isEmpty()) {
                     continue;
                 }
-                
-                String[] partes = linea.trim().split("\\s+");
-                if (partes.length >= 6) {
+
+                // Nuevo formato: id_pedido-aaaammdd-hh-mm-dest-###-idCliente
+                String[] partes = linea.trim().split("-");
+                if (partes.length == 7) {
                     try {
-                        int diasPrioridad = Integer.parseInt(partes[0]);
-                        int hora = Integer.parseInt(partes[1]);
-                        int minuto = Integer.parseInt(partes[2]);
-                        String codigoAeropuertoDestino = partes[3].trim().toUpperCase();
-                        int cantidadProductos = Integer.parseInt(partes[4]);
-                        Long idCliente = (long) Integer.parseInt(partes[5]);
-                        
+                        String idPedidoStr = partes[0].trim(); // no usado internamente, puede almacenarse si existe campo
+                        String fechaStr = partes[1].trim();    // yyyyMMdd
+                        String horaStr = partes[2].trim();     // HH
+                        String minutoStr = partes[3].trim();   // mm
+                        String codigoAeropuertoDestino = partes[4].trim().toUpperCase();
+                        String cantidadStr = partes[5].trim(); // ### como cadena
+                        String idClienteStr = partes[6].trim(); // 7 dígitos
+
+                        // Validaciones básicas
+                        if (fechaStr.length() != 8) {
+                            log.warn("Línea {}: Fecha con formato incorrecto: {}", lineNumber, fechaStr);
+                            continue;
+                        }
+                        if (horaStr.length() != 2 || minutoStr.length() != 2) {
+                            log.warn("Línea {}: Hora/minuto con formato incorrecto: {}:{}", lineNumber, horaStr, minutoStr);
+                            continue;
+                        }
+                        if (cantidadStr.length() != 3) {
+                            log.warn("Línea {}: Cantidad con formato incorrecto: {}", lineNumber, cantidadStr);
+                            continue;
+                        }
+                        if (idClienteStr.length() != 7) {
+                            log.warn("Línea {}: IdCliente con formato incorrecto: {}", lineNumber, idClienteStr);
+                            continue;
+                        }
+
+                        // Parsear aeropuerto destino
                         Aeropuerto aeropuertoDestino = mapaAeropuertos.get(codigoAeropuertoDestino);
-                        
                         if (aeropuertoDestino == null) {
                             log.warn("Línea {}: Aeropuerto destino no encontrado: {}", lineNumber, codigoAeropuertoDestino);
                             continue;
                         }
-                        
-                        // Crear pedido completo (adaptado de LectorPedidos)
-                        Pedido pedido = crearPedidoCompleto(
-                            idCliente,
-                            diasPrioridad,
-                            hora,
-                            minuto,
-                            aeropuertoDestino,
-                            cantidadProductos,
-                            mapaAeropuertos
+
+                        // Parsear cantidad e idCliente
+                        int cantidadProductos = Integer.parseInt(cantidadStr);
+                        long idCliente = Long.parseLong(idClienteStr);
+
+                        // Parsear fecha y hora
+                        java.time.format.DateTimeFormatter df = java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd");
+                        java.time.LocalDate fecha = java.time.LocalDate.parse(fechaStr, df);
+                        int hora = Integer.parseInt(horaStr);
+                        int minuto = Integer.parseInt(minutoStr);
+                        if (hora < 0 || hora > 23 || minuto < 0 || minuto > 59) {
+                            log.warn("Línea {}: Hora/minuto fuera de rango: {}:{}", lineNumber, hora, minuto);
+                            continue;
+                        }
+                        java.time.LocalDateTime fechaPedido = java.time.LocalDateTime.of(fecha, java.time.LocalTime.of(hora, minuto));
+                        // Usar 7 días por defecto para plazo de entrega (puede ajustarse según reglas)
+                        java.time.LocalDateTime plazoEntrega = calcularPlazoEntrega(7, fechaPedido);
+
+                        // Crear cliente
+                        com.grupo5e.morapack.core.model.Cliente cliente = new com.grupo5e.morapack.core.model.Cliente();
+                        cliente.setId(idCliente);
+                        cliente.setNombres("Cliente " + idCliente);
+                        cliente.setCorreo("cliente" + idCliente + "@morapack.com");
+                        cliente.setCiudadRecojo(aeropuertoDestino.getCiudad());
+
+                        // Crear pedido
+                        Pedido pedido = new Pedido();
+                        pedido.setId(Long.parseLong(idPedidoStr));
+                        pedido.setCliente(cliente);
+                        pedido.setAeropuertoDestinoCodigo(aeropuertoDestino.getCodigoIATA());
+                        pedido.setFechaPedido(fechaPedido);
+                        pedido.setFechaLimiteEntrega(plazoEntrega);
+                        pedido.setEstado(com.grupo5e.morapack.core.enums.EstadoPedido.PENDIENTE);
+
+                        // Origen: almacén aleatorio en el mismo continente si es posible
+                        Aeropuerto aeropuertoOrigen = obtenerAeropuertoAlmacenAleatorio(
+                                aeropuertoDestino.getCiudad().getContinente(),
+                                mapaAeropuertos
                         );
-                        
+                        pedido.setAeropuertoOrigenCodigo(aeropuertoOrigen.getCodigoIATA());
+
+                        // Prioridad calculada
+                        double prioridad = calcularPrioridad(fechaPedido, plazoEntrega);
+                        pedido.setPrioridad(prioridad);
+
+                        // Productos
+                        List<com.grupo5e.morapack.core.model.Producto> productos = crearProductos(cantidadProductos, pedido);
+                        pedido.setProductos(productos);
+
                         pedidos.add(pedido);
-                        
+
                     } catch (Exception e) {
                         log.warn("Error parseando línea {}: {}", lineNumber, e.getMessage());
                     }
+                } else {
+                    log.warn("Línea {}: Formato inválido, se esperaban 7 partes separadas por '-': {}", lineNumber, linea);
                 }
             }
         }
-        
+
         return pedidos;
     }
-    
+
+
     private Map<String, Aeropuerto> createAeropuertosMap(List<Aeropuerto> aeropuertos) {
         Map<String, Aeropuerto> mapa = new HashMap<>();
         for (Aeropuerto aeropuerto : aeropuertos) {

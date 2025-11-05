@@ -146,7 +146,8 @@ public class SimulacionAsyncService {
 
             simulacion.setCostoTotal(costoTotal);
             simulacion.setTiempoPromedioEntrega(tiempoPromedio);
-
+            
+            //GUARDAR RESULTADOS GENERALES DEL LA SIMULACION
             simulacionRepository.save(simulacion);
 
             // Guardar asignaciones

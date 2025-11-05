@@ -77,9 +77,9 @@ public class CoordenadasUtils {
                 .trim();
 
         // Si contiene símbolos de grados, es formato DMS
-        if (limpia.contains("°") || limpia.contains("'") || 
-            limpia.contains("\"") || limpia.contains("N") || 
-            limpia.contains("S") || limpia.contains("E") || 
+        if (limpia.contains("°") || limpia.contains("'") ||
+            limpia.contains("\"") || limpia.contains("N") ||
+            limpia.contains("S") || limpia.contains("E") ||
             limpia.contains("W")) {
             return dmsADecimal(limpia);
         }

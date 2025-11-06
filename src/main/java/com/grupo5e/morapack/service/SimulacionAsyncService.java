@@ -213,6 +213,26 @@ public class SimulacionAsyncService {
 
             for (int secuencia = 0; secuencia < ruta.size(); secuencia++) {
                 Vuelo vuelo = ruta.get(secuencia);
+                // ===== DEBUG: qué viene en 'vuelo' =====
+                if (vuelo == null) {
+                    log.error("🛫 [secuencia={}] Vuelo es NULL", secuencia);
+                } else {
+                    String iataOri = (vuelo.getAeropuertoOrigen() != null) ? vuelo.getAeropuertoOrigen().getCodigoIATA() : "NULL";
+                    String iataDes = (vuelo.getAeropuertoDestino() != null) ? vuelo.getAeropuertoDestino().getCodigoIATA() : "NULL";
+                    log.info(
+                            "🛫 Vuelo en ruta[{}]: id={}, origen={}, destino={}, tiempoHoras={}, costo={}",
+                            secuencia,
+                            vuelo.getId(),               // <- si es null, es transient// o el campo único que uses
+                            iataOri,
+                            iataDes,
+                            vuelo.getTiempoTransporte(),
+                            vuelo.getCosto()
+                    );
+
+                    if (vuelo.getId() == 0) {
+                        log.warn("⚠️ Vuelo TRANSIENT (sin id). Si guardo SimulacionAsignacion así, va a fallar.");
+                    }
+                }
                 // Calcular minutos de inicio y fin
                 int minutoInicio = minutoActual;
                 int duracionMinutos = (int) (vuelo.getTiempoTransporte() * 60);

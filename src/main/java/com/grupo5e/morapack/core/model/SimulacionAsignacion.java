@@ -28,10 +28,13 @@ public class SimulacionAsignacion {
 
     @ManyToOne
     @JoinColumn(name = "pedido_id", nullable = false)
-    private Pedido pedido;
+    private PedidoTemporal pedido;
 
     @Column(name = "secuencia")
     private Integer secuencia; // Orden en la ruta (1, 2, 3...)
+
+    @Column(name = "indice_Producto")
+    private Integer indiceProducto; // Índice del producto en el pedido 
 
     @ManyToOne
     @JoinColumn(name = "vuelo_id", nullable = false)

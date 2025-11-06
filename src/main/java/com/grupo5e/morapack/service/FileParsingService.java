@@ -20,6 +20,9 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Random;
+import java.util.stream.Collectors;
 
 /**
  * Servicio para parsear archivos de simulación desde bytes
@@ -29,9 +32,11 @@ import java.util.Map;
 public class FileParsingService {
     
     private final AeropuertoService aeropuertoService;
-    
-    public FileParsingService(AeropuertoService aeropuertoService) {
+    private final PedidoTemporalService pedidoTemporalService;
+
+    public FileParsingService(AeropuertoService aeropuertoService, PedidoTemporalService pedidoTemporalService) {
         this.aeropuertoService = aeropuertoService;
+        this.pedidoTemporalService = pedidoTemporalService;
     }
     
     /**
@@ -127,7 +132,9 @@ public class FileParsingService {
             }
             
             List<Pedido> pedidos = parsePedidosFromBytes(content, aeropuertos);
-            
+            //SE GUARDAN LOS PEDIDOS TEMPORALMENTE EN LA BD
+            pedidoTemporalService.guardarPedidosTemporales(pedidos);
+
             if (pedidos.isEmpty()) {
                 result.addError("No se encontraron pedidos válidos en el archivo");
                 return result;
@@ -415,7 +422,7 @@ public class FileParsingService {
                         pedido.setEstado(com.grupo5e.morapack.core.enums.EstadoPedido.PENDIENTE);
 
                         // Origen: almacén aleatorio en el mismo continente si es posible
-                        Aeropuerto aeropuertoOrigen = obtenerAeropuertoAlmacenAleatorio(
+                        Aeropuerto aeropuertoOrigen = obtenerAeropuertoAlmacenPrincipal(
                                 aeropuertoDestino.getCiudad().getContinente(),
                                 mapaAeropuertos
                         );
@@ -498,7 +505,7 @@ public class FileParsingService {
         pedido.setEstado(com.grupo5e.morapack.core.enums.EstadoPedido.PENDIENTE);
         
         // Establecer aeropuerto origen (almacén inicial aleatorio)
-        Aeropuerto aeropuertoOrigen = obtenerAeropuertoAlmacenAleatorio(
+        Aeropuerto aeropuertoOrigen = obtenerAeropuertoAlmacenPrincipal(
             aeropuertoDestino.getCiudad().getContinente(),
             mapaAeropuertos
         );
@@ -536,22 +543,27 @@ public class FileParsingService {
         }
     }
     
-    private Aeropuerto obtenerAeropuertoAlmacenAleatorio(Continente continente, Map<String, Aeropuerto> mapaAeropuertos) {
-        // Filtrar aeropuertos por continente
-        List<Aeropuerto> aeropuertosContinente = mapaAeropuertos.values().stream()
-            .filter(a -> a.getCiudad() != null && a.getCiudad().getContinente() == continente)
-            .collect(java.util.stream.Collectors.toList());
-        
-        if (aeropuertosContinente.isEmpty()) {
-            // Si no hay aeropuertos en ese continente, usar cualquiera
-            return new ArrayList<>(mapaAeropuertos.values()).get(0);
+    private Aeropuerto obtenerAeropuertoAlmacenPrincipal(Continente continente, Map<String, Aeropuerto> mapaAeropuertos) {
+        // Lista de los 3 aeropuertos principales
+        List<String> principales = List.of("SPIM", "EBCI", "UBBB");
+
+        // Filtrar los que realmente existan en el mapa
+        List<Aeropuerto> disponibles = principales.stream()
+            .map(mapaAeropuertos::get)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toList());
+
+        // Si no hay ninguno disponible, retornar cualquiera del mapa
+        if (disponibles.isEmpty()) {
+            return mapaAeropuertos.values().iterator().next();
         }
-        
-        // Seleccionar aleatoriamente
-        java.util.Random random = new java.util.Random();
-        return aeropuertosContinente.get(random.nextInt(aeropuertosContinente.size()));
+
+        // Elegir uno aleatoriamente entre los principales
+        Random random = new Random();
+        return disponibles.get(random.nextInt(disponibles.size()));
     }
-    
+
+
     private double calcularPrioridad(java.time.LocalDateTime fechaPedido, java.time.LocalDateTime plazoEntrega) {
         long horasDisponibles = java.time.Duration.between(fechaPedido, plazoEntrega).toHours();
         if (horasDisponibles <= 0) {

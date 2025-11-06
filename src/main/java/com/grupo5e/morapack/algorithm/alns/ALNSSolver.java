@@ -2595,7 +2595,8 @@ public ALNSSolver(AeropuertoService aeropuertoService,
     //METODO PARA AGREGAR AEROPUERTOS ORIGEN
     private void asignarAeropuertosOrigen(){
         for(Pedido pedido : pedidos){
-            pedido.setAeropuertoOrigenCodigo(colocarAeropuertoPrincipalAleatorio(pedido.getAeropuertoDestinoCodigo()));
+            if(pedido.getAeropuertoOrigenCodigo() == null || pedido.getAeropuertoOrigenCodigo().isBlank())
+                pedido.setAeropuertoOrigenCodigo(colocarAeropuertoPrincipalAleatorio(pedido.getAeropuertoDestinoCodigo()));
         }
 //        // A) Completar en pedidosOriginales
 //        for (Pedido p : pedidosOriginales) {

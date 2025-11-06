@@ -115,10 +115,14 @@ public class DataLoader {
     private Pedido crearUnidadPaquete(Pedido pedidoOriginal, int indiceUnidad) {
         // Implementación simplificada de creación de unidad
         Pedido unidad = new Pedido();
-        String idUnidadString = pedidoOriginal.getId() + "#" + indiceUnidad;
-        unidad.setId((long) idUnidadString.hashCode());
+        // String idUnidadString = pedidoOriginal.getId() + "#" + indiceUnidad;
+        // unidad.setId((long) idUnidadString.hashCode());
+        // Generar ID único garantizado
+        long idUnico = pedidoOriginal.getId() * 1000L + indiceUnidad;
+        unidad.setId(idUnico);
         unidad.setCliente(pedidoOriginal.getCliente());
         unidad.setAeropuertoDestinoCodigo(pedidoOriginal.getAeropuertoDestinoCodigo());
+        unidad.setAeropuertoOrigenCodigo(pedidoOriginal.getAeropuertoOrigenCodigo());
         unidad.setFechaPedido(pedidoOriginal.getFechaPedido());
         unidad.setFechaLimiteEntrega(pedidoOriginal.getFechaLimiteEntrega());
         unidad.setEstado(pedidoOriginal.getEstado());

@@ -209,7 +209,19 @@ public class SimulacionAsyncService {
         for (Map.Entry<Pedido, ArrayList<Vuelo>> entry : solucion.entrySet()) {
             Pedido pedido = entry.getKey();
             ArrayList<Vuelo> ruta = entry.getValue();
-
+            //CREAR Y GUARDAR EN LAS ASIGNACIONES EL PEDIDO TEMPORAL
+            PedidoTemporal pedidoTemporal = new PedidoTemporal();
+            Long idPedidoOriginal = pedido.getId()/1000;
+            pedidoTemporal.setIdPedidoArchivo(idPedidoOriginal);
+            pedidoTemporal.setAeropuertoOrigen(pedido.getAeropuertoOrigenCodigo());
+            pedidoTemporal.setAeropuertoDestino(pedido.getAeropuertoDestinoCodigo());
+            pedidoTemporal.setFechaPedido(pedido.getFechaPedido());
+            pedidoTemporal.setFechaLimiteEntrega(pedido.getFechaLimiteEntrega());
+            pedidoTemporal.setIdCliente(pedido.getCliente().getId());
+            pedidoTemporal.setCantidadProductos(pedido.getCantidadProductos());
+            pedidoTemporal.setPrioridad(pedido.getPrioridad());
+            pedidoTemporal.setEstado(pedido.getEstado());
+            //FIN CREAR Y GUARDAR PEDIDO TEMPORAL
             int minutoActual = calcularMinutoInicio(pedido, T0);
 
             for (int secuencia = 0; secuencia < ruta.size(); secuencia++) {
@@ -243,7 +255,8 @@ public class SimulacionAsyncService {
                 // Crear asignación
                 SimulacionAsignacion asignacion = new SimulacionAsignacion();
                 asignacion.setSimulacion(simulacion);
-                asignacion.setPedido(pedido);
+                asignacion.setPedido(pedidoTemporal);
+                asignacion.setIndiceProducto((int)(pedido.getId() % 1000)); // Índice del producto
                 asignacion.setSecuencia(secuencia + 1);
                 asignacion.setVuelo(vuelo);
                 asignacion.setMinutoInicio(minutoInicio);

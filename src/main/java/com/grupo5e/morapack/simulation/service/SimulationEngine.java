@@ -184,20 +184,19 @@ public class SimulationEngine {
             }
             
             // Extraer pedidos en este vuelo (distinct por ID)
-            List<Pedido> pedidosEnVuelo = vueloAsignaciones.stream()
+            List<PedidoTemporal> pedidosEnVuelo = vueloAsignaciones.stream()
                     .map(SimulacionAsignacion::getPedido)
                     .distinct()
                     .collect(Collectors.toList());
             
             // Extraer IDs de pedidos para el DTO
             List<Long> packagesOnBoard = pedidosEnVuelo.stream()
-                    .map(Pedido::getId)
+                    .map(PedidoTemporal::getId)
                     .collect(Collectors.toList());
             
             // ✅ CALCULAR CAPACIDAD DINÁMICA (suma de productos de todos los pedidos a bordo)
             int capacidadUsadaDinamica = pedidosEnVuelo.stream()
-                    .mapToInt(p -> p.getProductos() != null ? p.getProductos().size() : 1)
-                    .sum();
+            .mapToInt(p -> p.getCantidadProductos()).sum();
             
             int capacidadMaxima = vuelo.getCapacidadMaxima();
             

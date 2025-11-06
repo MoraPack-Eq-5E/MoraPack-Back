@@ -211,22 +211,23 @@ public class VisualizacionMapaService {
             throw new RuntimeException("No se encontró ruta para el pedido: " + pedidoId);
         }
 
-        Pedido pedido = asignaciones.get(0).getPedido();
+        //Pedido pedido = asignaciones.get(0).getPedido();
+        PedidoTemporal pedido = asignaciones.get(0).getPedido();
         
         RutaPaqueteDTO dto = new RutaPaqueteDTO();
         dto.setPedidoId(pedidoId);
-        dto.setCodigoOrigen(pedido.getAeropuertoOrigenCodigo());
-        dto.setCodigoDestino(pedido.getAeropuertoDestinoCodigo());
+        dto.setCodigoOrigen(pedido.getAeropuertoOrigen());
+        dto.setCodigoDestino(pedido.getAeropuertoDestino());
         dto.setCantidadProductos(pedido.getCantidadProductos());
         dto.setEstadoPedido(pedido.getEstado() != null ? pedido.getEstado().name() : "DESCONOCIDO");
 
-        if (pedido.getCliente() != null) {
-            String nombreCliente = pedido.getCliente().getNombres() != null ? 
-                    pedido.getCliente().getNombres() + " " + 
-                    (pedido.getCliente().getApellidos() != null ? pedido.getCliente().getApellidos() : "") 
-                    : "Cliente #" + pedido.getCliente().getId();
-            dto.setNombreCliente(nombreCliente.trim());
-        }
+        // if (pedido.getIdCliente() != null) {
+        //     String nombreCliente = pedido.getIdCliente().getNombres() != null ? 
+        //             pedido.getIdCliente().getNombres() + " " + 
+        //             (pedido.getIdCliente().getApellidos() != null ? pedido.getCliente().getApellidos() : "") 
+        //             : "Cliente #" + pedido.getIdCliente().getId();
+        //     dto.setNombreCliente(nombreCliente.trim());
+        // }
 
         // Crear tramos
         List<TramoRutaDTO> tramos = new ArrayList<>();

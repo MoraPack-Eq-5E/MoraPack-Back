@@ -205,7 +205,9 @@ public class SimulacionAsyncService {
                                        HashMap<Pedido, ArrayList<Vuelo>> solucion,
                                        LocalDateTime T0) {
         int contador = 0;
-        
+        //ELIMINAR ASIGNACIONES ANTERIORES
+        asignacionRepository.deleteAll();
+        //RECORRER SOLUCION PARA GUARDAR ASIGNACIONES   
         for (Map.Entry<Pedido, ArrayList<Vuelo>> entry : solucion.entrySet()) {
             Pedido pedido = entry.getKey();
             ArrayList<Vuelo> ruta = entry.getValue();
@@ -254,7 +256,7 @@ public class SimulacionAsyncService {
 
                 // Crear asignación
                 SimulacionAsignacion asignacion = new SimulacionAsignacion();
-                asignacion.setSimulacion(simulacion);
+                //asignacion.setSimulacion(simulacion);
                 asignacion.setPedido(pedidoTemporal);
                 asignacion.setIndiceProducto((int)(pedido.getId() % 1000)); // Índice del producto
                 asignacion.setSecuencia(secuencia + 1);

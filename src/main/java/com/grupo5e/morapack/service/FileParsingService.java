@@ -7,6 +7,8 @@ import com.grupo5e.morapack.core.model.Aeropuerto;
 import com.grupo5e.morapack.core.model.Ciudad;
 import com.grupo5e.morapack.core.model.Pedido;
 import com.grupo5e.morapack.core.model.Vuelo;
+import com.grupo5e.morapack.repository.SimulacionAsignacionRepository;
+
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -33,10 +35,13 @@ public class FileParsingService {
     
     private final AeropuertoService aeropuertoService;
     private final PedidoTemporalService pedidoTemporalService;
+    private final SimulacionAsignacionRepository simulacionAsignacionRepository;
 
-    public FileParsingService(AeropuertoService aeropuertoService, PedidoTemporalService pedidoTemporalService) {
+    public FileParsingService(AeropuertoService aeropuertoService, 
+    PedidoTemporalService pedidoTemporalService, SimulacionAsignacionRepository simulacionAsignacionRepository) {
         this.aeropuertoService = aeropuertoService;
         this.pedidoTemporalService = pedidoTemporalService;
+        this.simulacionAsignacionRepository = simulacionAsignacionRepository;
     }
     
     /**
@@ -132,6 +137,8 @@ public class FileParsingService {
             }
             
             List<Pedido> pedidos = parsePedidosFromBytes(content, aeropuertos);
+            //ELIMINAR ASIGNACIONES ANTERIORES
+            //simulacionAsignacionRepository.deleteAll();
             //SE GUARDAN LOS PEDIDOS TEMPORALMENTE EN LA BD
             pedidoTemporalService.guardarPedidosTemporales(pedidos);
 
@@ -435,7 +442,7 @@ public class FileParsingService {
                         // Productos
                         List<com.grupo5e.morapack.core.model.Producto> productos = crearProductos(cantidadProductos, pedido);
                         pedido.setProductos(productos);
-
+                        pedido.setCantidadProductos(cantidadProductos);
                         pedidos.add(pedido);
 
                     } catch (Exception e) {

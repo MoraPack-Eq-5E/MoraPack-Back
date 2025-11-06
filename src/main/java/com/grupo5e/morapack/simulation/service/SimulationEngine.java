@@ -101,7 +101,7 @@ public class SimulationEngine {
                 .orElseThrow(() -> new RuntimeException("Simulación no encontrada: " + simulacionId));
         
         // Cargar asignaciones desde BD
-        List<SimulacionAsignacion> asignaciones = asignacionRepository.findBySimulacion(simulacion);
+        List<SimulacionAsignacion> asignaciones = asignacionRepository.findAll();
         
         if (asignaciones.isEmpty()) {
             throw new RuntimeException("La simulación no tiene asignaciones (solución vacía)");
@@ -218,10 +218,10 @@ public class SimulationEngine {
                     .orElse(0);
             
             // Obtener T0 de la primera simulación
-            LocalDateTime t0 = first.getSimulacion().getTiempoInicialReferencia();
+            // LocalDateTime t0 = first.getSimulacion().getTiempoInicialReferencia();
             
-            LocalDateTime departureTime = t0.plusMinutes(minutoInicio);
-            LocalDateTime arrivalTime = t0.plusMinutes(minutoFin);
+            // LocalDateTime departureTime = t0.plusMinutes(minutoInicio);
+            // LocalDateTime arrivalTime = t0.plusMinutes(minutoFin);
             
             FlightSnapshot snapshot = FlightSnapshot.builder()
                     .flightId(vueloId)
@@ -233,8 +233,8 @@ public class SimulationEngine {
                     .destinationLng(destLng)
                     .currentLat(originLat)  // Inicialmente en origen
                     .currentLng(originLng)
-                    .departureTime(departureTime)
-                    .arrivalTime(arrivalTime)
+                    // .departureTime(departureTime)
+                    // .arrivalTime(arrivalTime)
                     .status(FlightStatus.SCHEDULED)
                     .progress(0.0)
                     .progressPercentage(0.0)

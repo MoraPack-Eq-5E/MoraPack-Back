@@ -284,7 +284,7 @@ public class SimulacionController {
             @Parameter(description = "ID del pedido/paquete", required = true)
             @PathVariable Long pedidoId) {
         
-        RutaPaqueteDTO ruta = visualizacionService.obtenerRutaPaquete(simulacionId, pedidoId);
+        RutaPaqueteDTO ruta = visualizacionService.obtenerRutaPaquete(pedidoId);
         return ResponseEntity.ok(ruta);
     }
 

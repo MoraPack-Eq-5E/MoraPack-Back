@@ -22,9 +22,9 @@ public class SimulacionAsignacion {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne
-    @JoinColumn(name = "simulacion_id", nullable = false)
-    private SimulacionSemanal simulacion;
+    // @ManyToOne
+    // @JoinColumn(name = "simulacion_id", nullable = false)
+    // private SimulacionSemanal simulacion;
 
     @ManyToOne
     @JoinColumn(name = "pedido_id", nullable = false)

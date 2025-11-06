@@ -87,14 +87,11 @@ public class VisualizacionMapaService {
      * Obtiene los vuelos activos en un minuto específico de la simulación
      */
     @Transactional(readOnly = true)
-    public List<VueloActivoDTO> obtenerVuelosActivos(Long simulacionId, Integer minutoActual) {
-        // Verificar que la simulación existe
-        simulacionRepository.findById(simulacionId)
-                .orElseThrow(() -> new RuntimeException("Simulación no encontrada: " + simulacionId));
+    public List<VueloActivoDTO> obtenerVuelosActivos(Integer minutoActual) {
 
-        // Obtener asignaciones activas en este minuto
-        List<SimulacionAsignacion> asignacionesActivas = 
-                asignacionRepository.findAsignacionesActivasEnMinuto(simulacionId, minutoActual);
+        // Obtener todas las asignaciones activas en ese minuto
+        List<SimulacionAsignacion> asignacionesActivas = asignacionRepository
+                .findByMinutoInicioLessThanEqualAndMinutoFinGreaterThanEqual(minutoActual, minutoActual);
 
         // Agrupar por vuelo para evitar duplicados
         Map<Integer, List<SimulacionAsignacion>> porVuelo = asignacionesActivas.stream()
@@ -112,6 +109,33 @@ public class VisualizacionMapaService {
 
         return vuelosActivos;
     }
+
+    // @Transactional(readOnly = true)
+    // public List<VueloActivoDTO> obtenerVuelosActivos(Long simulacionId, Integer minutoActual) {
+    //     // Verificar que la simulación existe
+    //     simulacionRepository.findById(simulacionId)
+    //             .orElseThrow(() -> new RuntimeException("Simulación no encontrada: " + simulacionId));
+
+    //     // Obtener asignaciones activas en este minuto
+    //     List<SimulacionAsignacion> asignacionesActivas = 
+    //             asignacionRepository.findAsignacionesActivasEnMinuto(simulacionId, minutoActual);
+
+    //     // Agrupar por vuelo para evitar duplicados
+    //     Map<Integer, List<SimulacionAsignacion>> porVuelo = asignacionesActivas.stream()
+    //             .collect(Collectors.groupingBy(a -> a.getVuelo().getId()));
+
+    //     List<VueloActivoDTO> vuelosActivos = new ArrayList<>();
+
+    //     for (Map.Entry<Integer, List<SimulacionAsignacion>> entry : porVuelo.entrySet()) {
+    //         List<SimulacionAsignacion> asignaciones = entry.getValue();
+    //         SimulacionAsignacion primeraAsignacion = asignaciones.get(0);
+
+    //         VueloActivoDTO vueloDTO = crearVueloActivoDTO(primeraAsignacion, minutoActual, asignaciones);
+    //         vuelosActivos.add(vueloDTO);
+    //     }
+
+    //     return vuelosActivos;
+    // }
 
     /**
      * Crea un DTO de vuelo activo calculando su posición actual
@@ -196,14 +220,10 @@ public class VisualizacionMapaService {
      * Obtiene la ruta completa de un paquete específico
      */
     @Transactional(readOnly = true)
-    public RutaPaqueteDTO obtenerRutaPaquete(Long simulacionId, Long pedidoId) {
-        SimulacionSemanal simulacion = simulacionRepository.findById(simulacionId)
-                .orElseThrow(() -> new RuntimeException("Simulación no encontrada: " + simulacionId));
-
-        // Obtener todas las asignaciones de este paquete
-        List<SimulacionAsignacion> asignaciones = asignacionRepository.findBySimulacion(simulacion)
+    public RutaPaqueteDTO obtenerRutaPaquete(Long pedidoId) {
+        // Buscar todas las asignaciones que pertenecen al pedido
+        List<SimulacionAsignacion> asignaciones = asignacionRepository.findByPedidoId(pedidoId)
                 .stream()
-                .filter(a -> a.getPedido().getId().equals(pedidoId))
                 .sorted(Comparator.comparing(SimulacionAsignacion::getSecuencia))
                 .collect(Collectors.toList());
 
@@ -211,23 +231,15 @@ public class VisualizacionMapaService {
             throw new RuntimeException("No se encontró ruta para el pedido: " + pedidoId);
         }
 
-        //Pedido pedido = asignaciones.get(0).getPedido();
+        // Obtener pedido desde la primera asignación
         PedidoTemporal pedido = asignaciones.get(0).getPedido();
-        
+
         RutaPaqueteDTO dto = new RutaPaqueteDTO();
         dto.setPedidoId(pedidoId);
         dto.setCodigoOrigen(pedido.getAeropuertoOrigen());
         dto.setCodigoDestino(pedido.getAeropuertoDestino());
         dto.setCantidadProductos(pedido.getCantidadProductos());
         dto.setEstadoPedido(pedido.getEstado() != null ? pedido.getEstado().name() : "DESCONOCIDO");
-
-        // if (pedido.getIdCliente() != null) {
-        //     String nombreCliente = pedido.getIdCliente().getNombres() != null ? 
-        //             pedido.getIdCliente().getNombres() + " " + 
-        //             (pedido.getIdCliente().getApellidos() != null ? pedido.getCliente().getApellidos() : "") 
-        //             : "Cliente #" + pedido.getIdCliente().getId();
-        //     dto.setNombreCliente(nombreCliente.trim());
-        // }
 
         // Crear tramos
         List<TramoRutaDTO> tramos = new ArrayList<>();
@@ -245,15 +257,75 @@ public class VisualizacionMapaService {
         // Verificar si está a tiempo
         if (pedido.getFechaPedido() != null && pedido.getFechaLimiteEntrega() != null) {
             long horasDisponibles = java.time.Duration.between(
-                    pedido.getFechaPedido(), 
+                    pedido.getFechaPedido(),
                     pedido.getFechaLimiteEntrega()
             ).toHours();
-            
+
             dto.setATiempo(duracionTotalHoras <= horasDisponibles);
         }
 
         return dto;
     }
+
+    // @Transactional(readOnly = true)
+    // public RutaPaqueteDTO obtenerRutaPaquete(Long simulacionId, Long pedidoId) {
+    //     SimulacionSemanal simulacion = simulacionRepository.findById(simulacionId)
+    //             .orElseThrow(() -> new RuntimeException("Simulación no encontrada: " + simulacionId));
+
+    //     // Obtener todas las asignaciones de este paquete
+    //     List<SimulacionAsignacion> asignaciones = asignacionRepository.findBySimulacion(simulacion)
+    //             .stream()
+    //             .filter(a -> a.getPedido().getId().equals(pedidoId))
+    //             .sorted(Comparator.comparing(SimulacionAsignacion::getSecuencia))
+    //             .collect(Collectors.toList());
+
+    //     if (asignaciones.isEmpty()) {
+    //         throw new RuntimeException("No se encontró ruta para el pedido: " + pedidoId);
+    //     }
+
+    //     //Pedido pedido = asignaciones.get(0).getPedido();
+    //     PedidoTemporal pedido = asignaciones.get(0).getPedido();
+        
+    //     RutaPaqueteDTO dto = new RutaPaqueteDTO();
+    //     dto.setPedidoId(pedidoId);
+    //     dto.setCodigoOrigen(pedido.getAeropuertoOrigen());
+    //     dto.setCodigoDestino(pedido.getAeropuertoDestino());
+    //     dto.setCantidadProductos(pedido.getCantidadProductos());
+    //     dto.setEstadoPedido(pedido.getEstado() != null ? pedido.getEstado().name() : "DESCONOCIDO");
+
+    //     // if (pedido.getIdCliente() != null) {
+    //     //     String nombreCliente = pedido.getIdCliente().getNombres() != null ? 
+    //     //             pedido.getIdCliente().getNombres() + " " + 
+    //     //             (pedido.getIdCliente().getApellidos() != null ? pedido.getCliente().getApellidos() : "") 
+    //     //             : "Cliente #" + pedido.getIdCliente().getId();
+    //     //     dto.setNombreCliente(nombreCliente.trim());
+    //     // }
+
+    //     // Crear tramos
+    //     List<TramoRutaDTO> tramos = new ArrayList<>();
+    //     double duracionTotalHoras = 0.0;
+
+    //     for (SimulacionAsignacion asignacion : asignaciones) {
+    //         TramoRutaDTO tramo = crearTramoDTO(asignacion);
+    //         tramos.add(tramo);
+    //         duracionTotalHoras += tramo.getDuracionHoras();
+    //     }
+
+    //     dto.setTramos(tramos);
+    //     dto.setDuracionTotalHoras(Math.round(duracionTotalHoras * 100.0) / 100.0);
+
+    //     // Verificar si está a tiempo
+    //     if (pedido.getFechaPedido() != null && pedido.getFechaLimiteEntrega() != null) {
+    //         long horasDisponibles = java.time.Duration.between(
+    //                 pedido.getFechaPedido(), 
+    //                 pedido.getFechaLimiteEntrega()
+    //         ).toHours();
+            
+    //         dto.setATiempo(duracionTotalHoras <= horasDisponibles);
+    //     }
+
+    //     return dto;
+    // }
 
     /**
      * Crea un DTO de tramo de ruta

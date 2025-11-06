@@ -12,19 +12,14 @@ import java.util.List;
 
 @Repository
 public interface SimulacionAsignacionRepository extends JpaRepository<SimulacionAsignacion, Long> {
-    
-    List<SimulacionAsignacion> findBySimulacion(SimulacionSemanal simulacion);
-    
-    List<SimulacionAsignacion> findBySimulacionOrderByPedidoIdAscSecuenciaAsc(SimulacionSemanal simulacion);
-    
     List<SimulacionAsignacion> findByPedido(Pedido pedido);
-    
-    @Query("SELECT sa FROM SimulacionAsignacion sa WHERE sa.simulacion.id = :simulacionId " +
-           "AND sa.minutoInicio <= :minuto AND sa.minutoFin >= :minuto")
-    List<SimulacionAsignacion> findAsignacionesActivasEnMinuto(
-            @Param("simulacionId") Long simulacionId, 
-            @Param("minuto") Integer minuto);
-    
-    void deleteBySimulacion(SimulacionSemanal simulacion);
+
+    List<SimulacionAsignacion> findByMinutoInicioLessThanEqualAndMinutoFinGreaterThanEqual(
+        Integer minutoInicio, Integer minutoFin);
+
+    List<SimulacionAsignacion> findByPedidoId(Long pedidoId);
+
+    List<SimulacionAsignacion> findAllByOrderByPedidoIdAscSecuenciaAsc();
+
 }
 

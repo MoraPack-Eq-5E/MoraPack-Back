@@ -3,6 +3,7 @@ package com.grupo5e.morapack.service;
 import com.grupo5e.morapack.api.dto.*;
 import com.grupo5e.morapack.core.enums.EstadoSimulacion;
 import com.grupo5e.morapack.core.model.*;
+import com.grupo5e.morapack.repository.PedidoTemporalRepository;
 import com.grupo5e.morapack.repository.SimulacionAsignacionRepository;
 import com.grupo5e.morapack.repository.SimulacionSemanalRepository;
 import lombok.extern.slf4j.Slf4j;
@@ -21,16 +22,18 @@ public class SimulacionSemanalService {
     private final SimulacionAsignacionRepository asignacionRepository;
     private final SimulacionAsyncService simulacionAsyncService;
     private final PedidoService pedidoService;
+    private final PedidoTemporalRepository pedidoTemporalRepository;
 
     public SimulacionSemanalService(
             SimulacionSemanalRepository simulacionRepository,
             SimulacionAsignacionRepository asignacionRepository,
             SimulacionAsyncService simulacionAsyncService,
-            PedidoService pedidoService) {
+            PedidoService pedidoService, PedidoTemporalRepository pedidoTemporalRepository) {
         this.simulacionRepository = simulacionRepository;
         this.asignacionRepository = asignacionRepository;
         this.simulacionAsyncService = simulacionAsyncService;
         this.pedidoService = pedidoService;
+        this.pedidoTemporalRepository = pedidoTemporalRepository;
     }
 
     /**
@@ -129,10 +132,10 @@ public class SimulacionSemanalService {
             Map<Long, List<Integer>> solucionMap = construirMapaSolucion(simulacion);
             dto.setSolucion(solucionMap);
 
-            List<Long> noAsignadosIds = obtenerPedidosNoAsignadosIds(simulacion);
+            List<Long> noAsignadosIds = obtenerPedidosNoAsignadosIds();
             dto.setPedidosNoAsignadosIds(noAsignadosIds);
 
-            EstadisticasSimulacionDTO estadisticas = calcularEstadisticas(simulacion);
+            EstadisticasSimulacionDTO estadisticas = calcularEstadisticas();
             dto.setEstadisticas(estadisticas);
         }
 
@@ -144,7 +147,7 @@ public class SimulacionSemanalService {
      */
     private Map<Long, List<Integer>> construirMapaSolucion(SimulacionSemanal simulacion) {
         List<SimulacionAsignacion> asignaciones = 
-                asignacionRepository.findBySimulacionOrderByPedidoIdAscSecuenciaAsc(simulacion);
+                asignacionRepository.findAllByOrderByPedidoIdAscSecuenciaAsc();
 
         Map<Long, List<Integer>> solucionMap = new HashMap<>();
 
@@ -161,8 +164,8 @@ public class SimulacionSemanalService {
     /**
      * Obtiene los IDs de pedidos no asignados
      */
-    private List<Long> obtenerPedidosNoAsignadosIds(SimulacionSemanal simulacion) {
-        List<SimulacionAsignacion> asignaciones = asignacionRepository.findBySimulacion(simulacion);
+    private List<Long> obtenerPedidosNoAsignadosIds() {
+        List<SimulacionAsignacion> asignaciones = asignacionRepository.findAll();
         Set<Long> asignados = asignaciones.stream()
                 .map(a -> a.getPedido().getId())
                 .collect(Collectors.toSet());
@@ -178,10 +181,15 @@ public class SimulacionSemanalService {
     /**
      * Calcula estadísticas de la simulación
      */
-    private EstadisticasSimulacionDTO calcularEstadisticas(SimulacionSemanal simulacion) {
-        List<SimulacionAsignacion> asignaciones = asignacionRepository.findBySimulacion(simulacion);
+    private EstadisticasSimulacionDTO calcularEstadisticas() {
+        // Obtener todas las asignaciones actuales
+        List<SimulacionAsignacion> asignaciones = asignacionRepository.findAll();
 
-        // Agrupar por pedido
+        if (asignaciones.isEmpty()) {
+            throw new RuntimeException("No existen asignaciones registradas para calcular estadísticas.");
+        }
+
+        // Agrupar por pedido temporal
         Map<Long, List<SimulacionAsignacion>> porPedido = asignaciones.stream()
                 .collect(Collectors.groupingBy(a -> a.getPedido().getId()));
 
@@ -192,8 +200,11 @@ public class SimulacionSemanalService {
         int rutasIntercontinentales = 0;
 
         for (List<SimulacionAsignacion> ruta : porPedido.values()) {
+            // Ordenar por secuencia por seguridad
+            ruta.sort(Comparator.comparing(SimulacionAsignacion::getSecuencia));
+
             int numVuelos = ruta.size();
-            
+
             if (numVuelos == 1) rutasDirectas++;
             else if (numVuelos == 2) rutasUnaEscala++;
             else if (numVuelos >= 3) rutasDosEscalas++;
@@ -201,9 +212,11 @@ public class SimulacionSemanalService {
             // Verificar si es mismo continente
             SimulacionAsignacion primera = ruta.get(0);
             SimulacionAsignacion ultima = ruta.get(ruta.size() - 1);
-            
-            String continenteOrigen = primera.getVuelo().getAeropuertoOrigen().getCiudad().getContinente().name();
-            String continenteDestino = ultima.getVuelo().getAeropuertoDestino().getCiudad().getContinente().name();
+
+            String continenteOrigen = primera.getVuelo().getAeropuertoOrigen()
+                    .getCiudad().getContinente().name();
+            String continenteDestino = ultima.getVuelo().getAeropuertoDestino()
+                    .getCiudad().getContinente().name();
 
             if (continenteOrigen.equals(continenteDestino)) {
                 rutasMismoContinente++;
@@ -212,16 +225,34 @@ public class SimulacionSemanalService {
             }
         }
 
+        // Crear DTO
         EstadisticasSimulacionDTO stats = new EstadisticasSimulacionDTO();
         stats.setRutasDirectas(rutasDirectas);
         stats.setRutasUnaEscala(rutasUnaEscala);
         stats.setRutasDosEscalas(rutasDosEscalas);
         stats.setRutasMismoContinente(rutasMismoContinente);
         stats.setRutasIntercontinentales(rutasIntercontinentales);
-        stats.setEntregasATiempo(simulacion.getPedidosAsignados()); // Simplificado
-        
-        if (simulacion.getPedidosAsignados() != null && simulacion.getPedidosAsignados() > 0) {
-            double porcentajeATiempo = (stats.getEntregasATiempo() * 100.0) / simulacion.getPedidosAsignados();
+
+        // Si no tienes una entidad "SimulacionSemanal" en este contexto,
+        // puedes calcular las entregas a tiempo desde los pedidos temporales.
+        List<PedidoTemporal> pedidos = pedidoTemporalRepository.findAll();
+
+        long entregasATiempo = pedidos.stream()
+                .filter(p -> p.getFechaPedido() != null && p.getFechaLimiteEntrega() != null)
+                .filter(p -> {
+                    double duracionHoras = calcularDuracionPedido(asignaciones, p.getId());
+                    long horasDisponibles = java.time.Duration.between(
+                            p.getFechaPedido(),
+                            p.getFechaLimiteEntrega()
+                    ).toHours();
+                    return duracionHoras <= horasDisponibles;
+                })
+                .count();
+
+        stats.setEntregasATiempo((int) entregasATiempo);
+
+        if (!pedidos.isEmpty()) {
+            double porcentajeATiempo = (entregasATiempo * 100.0) / pedidos.size();
             stats.setPorcentajeEntregasATiempo(Math.round(porcentajeATiempo * 100.0) / 100.0);
         }
 
@@ -234,6 +265,76 @@ public class SimulacionSemanalService {
 
         return stats;
     }
+    private double calcularDuracionPedido(List<SimulacionAsignacion> asignaciones, Long pedidoId) {
+        List<SimulacionAsignacion> ruta = asignaciones.stream()
+                .filter(a -> a.getPedido().getId().equals(pedidoId))
+                .sorted(Comparator.comparing(SimulacionAsignacion::getSecuencia))
+                .toList();
+
+        if (ruta.isEmpty()) return 0.0;
+
+        SimulacionAsignacion primera = ruta.get(0);
+        SimulacionAsignacion ultima = ruta.get(ruta.size() - 1);
+
+        return (ultima.getMinutoFin() - primera.getMinutoInicio()) / 60.0; // en horas
+    }
+
+    // private EstadisticasSimulacionDTO calcularEstadisticas() {
+    //     List<SimulacionAsignacion> asignaciones = asignacionRepository.findAll();
+
+    //     // Agrupar por pedido
+    //     Map<Long, List<SimulacionAsignacion>> porPedido = asignaciones.stream()
+    //             .collect(Collectors.groupingBy(a -> a.getPedido().getId()));
+
+    //     int rutasDirectas = 0;
+    //     int rutasUnaEscala = 0;
+    //     int rutasDosEscalas = 0;
+    //     int rutasMismoContinente = 0;
+    //     int rutasIntercontinentales = 0;
+
+    //     for (List<SimulacionAsignacion> ruta : porPedido.values()) {
+    //         int numVuelos = ruta.size();
+            
+    //         if (numVuelos == 1) rutasDirectas++;
+    //         else if (numVuelos == 2) rutasUnaEscala++;
+    //         else if (numVuelos >= 3) rutasDosEscalas++;
+
+    //         // Verificar si es mismo continente
+    //         SimulacionAsignacion primera = ruta.get(0);
+    //         SimulacionAsignacion ultima = ruta.get(ruta.size() - 1);
+            
+    //         String continenteOrigen = primera.getVuelo().getAeropuertoOrigen().getCiudad().getContinente().name();
+    //         String continenteDestino = ultima.getVuelo().getAeropuertoDestino().getCiudad().getContinente().name();
+
+    //         if (continenteOrigen.equals(continenteDestino)) {
+    //             rutasMismoContinente++;
+    //         } else {
+    //             rutasIntercontinentales++;
+    //         }
+    //     }
+
+    //     EstadisticasSimulacionDTO stats = new EstadisticasSimulacionDTO();
+    //     stats.setRutasDirectas(rutasDirectas);
+    //     stats.setRutasUnaEscala(rutasUnaEscala);
+    //     stats.setRutasDosEscalas(rutasDosEscalas);
+    //     stats.setRutasMismoContinente(rutasMismoContinente);
+    //     stats.setRutasIntercontinentales(rutasIntercontinentales);
+    //     stats.setEntregasATiempo(simulacion.getPedidosAsignados()); // Simplificado
+        
+    //     if (simulacion.getPedidosAsignados() != null && simulacion.getPedidosAsignados() > 0) {
+    //         double porcentajeATiempo = (stats.getEntregasATiempo() * 100.0) / simulacion.getPedidosAsignados();
+    //         stats.setPorcentajeEntregasATiempo(Math.round(porcentajeATiempo * 100.0) / 100.0);
+    //     }
+
+    //     // Contar vuelos únicos utilizados
+    //     long vuelosUnicos = asignaciones.stream()
+    //             .map(a -> a.getVuelo().getId())
+    //             .distinct()
+    //             .count();
+    //     stats.setVuelosUtilizados((int) vuelosUnicos);
+
+    //     return stats;
+    // }
 
     /**
      * Formatea la duración en milisegundos a formato HH:mm:ss

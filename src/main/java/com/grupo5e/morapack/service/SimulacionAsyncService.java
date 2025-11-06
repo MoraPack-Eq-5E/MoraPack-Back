@@ -4,8 +4,7 @@ import com.grupo5e.morapack.algorithm.alns.ALNSSolver;
 import com.grupo5e.morapack.api.dto.SimulacionSemanalRequestDTO;
 import com.grupo5e.morapack.core.enums.EstadoSimulacion;
 import com.grupo5e.morapack.core.model.*;
-import com.grupo5e.morapack.repository.SimulacionAsignacionRepository;
-import com.grupo5e.morapack.repository.SimulacionSemanalRepository;
+import com.grupo5e.morapack.repository.*;
 import com.grupo5e.morapack.simulation.service.SimulationEngine;
 import com.grupo5e.morapack.utils.CoordenadasUtils;
 import lombok.extern.slf4j.Slf4j;
@@ -226,7 +225,26 @@ public class SimulacionAsyncService {
 
             for (int secuencia = 0; secuencia < ruta.size(); secuencia++) {
                 Vuelo vuelo = ruta.get(secuencia);
+                // ===== DEBUG: qué viene en 'vuelo' =====
+                if (vuelo == null) {
+                    log.error("🛫 [secuencia={}] Vuelo es NULL", secuencia);
+                } else {
+                    String iataOri = (vuelo.getAeropuertoOrigen() != null) ? vuelo.getAeropuertoOrigen().getCodigoIATA() : "NULL";
+                    String iataDes = (vuelo.getAeropuertoDestino() != null) ? vuelo.getAeropuertoDestino().getCodigoIATA() : "NULL";
+                    log.info(
+                            "🛫 Vuelo en ruta[{}]: id={}, origen={}, destino={}, tiempoHoras={}, costo={}",
+                            secuencia,
+                            vuelo.getId(),               // <- si es null, es transient// o el campo único que uses
+                            iataOri,
+                            iataDes,
+                            vuelo.getTiempoTransporte(),
+                            vuelo.getCosto()
+                    );
 
+                    if (vuelo.getId() == 0) {
+                        log.warn("⚠️ Vuelo TRANSIENT (sin id). Si guardo SimulacionAsignacion así, va a fallar.");
+                    }
+                }
                 // Calcular minutos de inicio y fin
                 int minutoInicio = minutoActual;
                 int duracionMinutos = (int) (vuelo.getTiempoTransporte() * 60);
@@ -235,7 +253,6 @@ public class SimulacionAsyncService {
                 // Obtener coordenadas
                 Aeropuerto origen = vuelo.getAeropuertoOrigen();
                 Aeropuerto destino = vuelo.getAeropuertoDestino();
-
                 // Log para debuggear (solo primera vez)
                 if (contador == 0) {
                     log.info("🔍 DEBUG - Parseando coordenadas:");

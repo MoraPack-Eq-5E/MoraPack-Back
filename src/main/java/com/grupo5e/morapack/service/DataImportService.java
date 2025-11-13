@@ -491,10 +491,12 @@ public class DataImportService {
      * @param files Array de archivos de pedidos
      * @param horaInicio Opcional: solo cargar pedidos después de esta hora
      * @param horaFin Opcional: solo cargar pedidos antes de esta hora
+     * @param modoSimulacion Modo de simulación: SEMANAL o COLAPSO
      * @return Map con resultados del batch
      */
     @Transactional
-    public Map<String, Object> importOrdersBatch(MultipartFile[] files, LocalDateTime horaInicio, LocalDateTime horaFin) {
+    public Map<String, Object> importOrdersBatch(MultipartFile[] files, LocalDateTime horaInicio, LocalDateTime horaFin,
+                                                  ModoSimulacion modoSimulacion) {
         Map<String, Object> batchResult = new HashMap<>();
         List<Map<String, Object>> fileResults = new ArrayList<>();
         
@@ -528,7 +530,7 @@ public class DataImportService {
                 
                 try {
                     // Importar archivo individual
-                    Map<String, Object> importResult = importOrders(file, horaInicio, horaFin);
+                    Map<String, Object> importResult = importOrders(file, horaInicio, horaFin, modoSimulacion);
                     
                     boolean success = (boolean) importResult.get("success");
                     fileResult.put("success", success);

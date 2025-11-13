@@ -45,6 +45,9 @@ public class LectorPedidosV2 {
     
     // Lista de clientes nuevos pendientes de guardar en batch
     private final List<Cliente> clientesNuevosPendientes = new ArrayList<>();
+    
+    // Lista temporal de pedidos por crear (para actualizar referencias de clientes)
+    private List<Pedido> pedidosPorCrear = new ArrayList<>();
 
     public LectorPedidosV2(String directorioDatos,
                           ArrayList<Aeropuerto> aeropuertos,
@@ -174,7 +177,8 @@ public class LectorPedidosV2 {
         try (BufferedReader reader = new BufferedReader(new FileReader(archivo))) {
             String linea;
             int numeroLinea = 0;
-            List<Pedido> pedidosPorCrear = new ArrayList<>();
+            // Reusar la lista de la clase para permitir actualización de referencias
+            pedidosPorCrear = new ArrayList<>();
 
             while ((linea = reader.readLine()) != null) {
                 numeroLinea++;
@@ -209,16 +213,8 @@ public class LectorPedidosV2 {
 
                     pedidosPorCrear.add(pedido);
 
-                    // OPTIMIZACIÓN: Guardar clientes cada 1000 pedidos para evitar problemas de flush
-                    if (clientesNuevosPendientes.size() >= 1000) {
-                        guardarClientesPendientes();
-                    }
-
-                    // Guardar en lotes de 100 para mejor rendimiento
-                    if (pedidosPorCrear.size() >= 100) {
-                        guardarLotePedidos(pedidosPorCrear, resultado);
-                        pedidosPorCrear.clear();
-                    }
+                    // NO guardamos clientes ni pedidos durante el loop
+                    // Los acumulamos todos para guardar al final en orden correcto
 
                 } catch (Exception e) {
                     resultado.erroresParseo++;
@@ -226,17 +222,19 @@ public class LectorPedidosV2 {
                 }
             }
 
-            // CRÍTICO: Guardar clientes ANTES de los pedidos restantes
+            System.out.println("  Líneas procesadas: " + numeroLinea);
+            
+            // PASO 1: Guardar TODOS los clientes primero
             if (!clientesNuevosPendientes.isEmpty()) {
-                guardarClientesPendientes();
+                System.out.println("  📊 Total clientes nuevos a guardar: " + clientesNuevosPendientes.size());
+                guardarClientesPendientesSinActualizarPedidos();
             }
             
-            // Guardar pedidos restantes
+            // PASO 2: Guardar TODOS los pedidos en lotes (ahora todos los clientes ya están persistidos)
             if (!pedidosPorCrear.isEmpty()) {
-                guardarLotePedidos(pedidosPorCrear, resultado);
+                System.out.println("  📦 Total pedidos a guardar: " + pedidosPorCrear.size());
+                guardarTodosLosPedidosEnLotes(resultado);
             }
-
-            System.out.println("  Líneas procesadas: " + numeroLinea);
         }
     }
 
@@ -306,26 +304,70 @@ public class LectorPedidosV2 {
     }
 
     /**
-     * Guarda los clientes pendientes en batch y actualiza el cache
+     * Guarda todos los clientes pendientes en batch y actualiza el cache
+     * CRÍTICO: Debe llamarse ANTES de guardar pedidos para evitar errrores
      */
-    private void guardarClientesPendientes() {
+    private void guardarClientesPendientesSinActualizarPedidos() {
         if (clientesNuevosPendientes.isEmpty()) {
             return;
         }
         
         System.out.println("  💾 Guardando " + clientesNuevosPendientes.size() + " clientes nuevos en batch...");
         try {
-            List<Cliente> clientesGuardados = clienteService.insertarBulk(clientesNuevosPendientes);
-            // Actualizar cache con clientes persistidos (con IDs de BD)
-            for (Cliente cliente : clientesGuardados) {
-                cacheClientes.put(String.valueOf(cliente.getId()), cliente);
+            // Crear un mapa temporal para relacionar ID -> instancia antigua
+            Map<Long, Cliente> clientesAntiguos = new HashMap<>();
+            for (Cliente clienteNuevo : clientesNuevosPendientes) {
+                clientesAntiguos.put(clienteNuevo.getId(), clienteNuevo);
             }
-            System.out.println("  ✅ " + clientesGuardados.size() + " clientes guardados");
+            
+            // Guardar en batch
+            List<Cliente> clientesGuardados = clienteService.insertarBulk(clientesNuevosPendientes);
+            
+            // CRÍTICO: Actualizar TODAS las referencias en los pedidos acumulados
+            System.out.println("  🔄 Actualizando referencias de clientes en " + pedidosPorCrear.size() + " pedidos...");
+            for (Cliente clientePersistido : clientesGuardados) {
+                String idStr = String.valueOf(clientePersistido.getId());
+                cacheClientes.put(idStr, clientePersistido);
+                
+                // Reemplazar referencias en TODOS los pedidos acumulados
+                Cliente clienteAntiguo = clientesAntiguos.get(clientePersistido.getId());
+                if (clienteAntiguo != null) {
+                    for (Pedido pedido : pedidosPorCrear) {
+                        if (pedido.getCliente() == clienteAntiguo) {
+                            pedido.setCliente(clientePersistido);
+                        }
+                    }
+                }
+            }
+            
+            System.out.println("  ✅ " + clientesGuardados.size() + " clientes guardados y referencias actualizadas");
         } catch (Exception e) {
             System.err.println("  ❌ Error guardando clientes en batch: " + e.getMessage());
             e.printStackTrace();
         }
         clientesNuevosPendientes.clear();
+    }
+    
+    /**
+     * Guarda todos los pedidos acumulados en lotes de 1000 para mejor rendimiento
+     * Se debe llamar DESPUÉS de guardar todos los clientes
+     */
+    private void guardarTodosLosPedidosEnLotes(ResultadoCargaPedidos resultado) {
+        final int BATCH_SIZE = 1000;
+        int totalPedidos = pedidosPorCrear.size();
+        int procesados = 0;
+        
+        while (procesados < totalPedidos) {
+            int endIndex = Math.min(procesados + BATCH_SIZE, totalPedidos);
+            List<Pedido> lote = pedidosPorCrear.subList(procesados, endIndex);
+            
+            System.out.println("  💾 Guardando lote de pedidos " + (procesados + 1) + "-" + endIndex + " de " + totalPedidos);
+            guardarLotePedidos(new ArrayList<>(lote), resultado);
+            
+            procesados = endIndex;
+        }
+        
+        pedidosPorCrear.clear();
     }
     
     /**

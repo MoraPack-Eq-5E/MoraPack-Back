@@ -267,9 +267,11 @@ public class DataImportController {
             @Parameter(description = "Hora de inicio para filtrar pedidos (ISO 8601, opcional)", example = "2025-01-02T00:00:00")
             @RequestParam(required = false) String horaInicio,
             @Parameter(description = "Hora de fin para filtrar pedidos (ISO 8601, opcional)", example = "2025-01-09T00:00:00")
-            @RequestParam(required = false) String horaFin) {
+            @RequestParam(required = false) String horaFin,
+            @Parameter(description = "Modo de simulación: SEMANAL o COLAPSO", example = "SEMANAL")
+            @RequestParam String modo) {
         
-        log.info("📦 Batch import de {} archivos de pedidos", files.length);
+        log.info("📦 Batch import de {} archivos de pedidos (modo: {})", files.length, modo);
         
         // Parsear fechas opcionales
         LocalDateTime horaInicioDateTime = null;
@@ -289,8 +291,19 @@ public class DataImportController {
             return ResponseEntity.badRequest().body(error);
         }
         
+        // Validar modo de simulación
+        ModoSimulacion modoSimulacion;
+        try {
+            modoSimulacion = ModoSimulacion.valueOf(modo.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", "Modo de simulación inválido. Use SEMANAL o COLAPSO");
+            return ResponseEntity.badRequest().body(error);
+        }
+        
         // Procesar archivos en batch
-        Map<String, Object> result = dataImportService.importOrdersBatch(files, horaInicioDateTime, horaFinDateTime);
+        Map<String, Object> result = dataImportService.importOrdersBatch(files, horaInicioDateTime, horaFinDateTime, modoSimulacion);
         
         boolean success = (boolean) result.get("success");
         HttpStatus status = success ? HttpStatus.OK : HttpStatus.BAD_REQUEST;

@@ -73,7 +73,8 @@ public class LectorPedidosV2 {
      */
     public ResultadoCargaPedidos leerYGuardarPedidos(
             LocalDateTime horaInicioSimulacion,
-            LocalDateTime horaFinSimulacion) {
+            LocalDateTime horaFinSimulacion,
+            ModoSimulacion modoSimulacion) {
         
         ResultadoCargaPedidos resultado = new ResultadoCargaPedidos();
         File directorio = new File(directorioDatos);
@@ -133,7 +134,8 @@ public class LectorPedidosV2 {
             System.out.println("\nProcesando archivo: " + nombreArchivo + " (origen: " + codigoAeropuertoOrigen + ")");
 
             try {
-                procesarArchivoPedidos(archivo, aeropuertoOrigen, horaInicioSimulacion, horaFinSimulacion, resultado);
+                procesarArchivoPedidos(archivo, aeropuertoOrigen, horaInicioSimulacion, horaFinSimulacion, resultado,
+                        modoSimulacion);
             } catch (Exception e) {
                 System.err.println("ERROR procesando archivo " + nombreArchivo + ": " + e.getMessage());
                 e.printStackTrace();
@@ -163,7 +165,8 @@ public class LectorPedidosV2 {
             Aeropuerto aeropuertoOrigen,
             LocalDateTime horaInicio,
             LocalDateTime horaFin,
-            ResultadoCargaPedidos resultado) throws IOException {
+            ResultadoCargaPedidos resultado,
+            ModoSimulacion modoSimulacion) throws IOException {
 
         try (BufferedReader reader = new BufferedReader(new FileReader(archivo))) {
             String linea;
@@ -182,14 +185,24 @@ public class LectorPedidosV2 {
                     Pedido pedido = parsearLineaPedido(linea, aeropuertoOrigen);
                     resultado.pedidosCargados++;
 
-                    // Filtrar por ventana de tiempo si se especificó
-                    if (horaInicio != null && horaFin != null) {
+                    // 👇 Solo filtrar si NO es modo COLAPSO
+                    if (modoSimulacion != ModoSimulacion.COLAPSO &&
+                            horaInicio != null && horaFin != null) {
                         if (pedido.getFechaPedido().isBefore(horaInicio) ||
                                 pedido.getFechaPedido().isAfter(horaFin)) {
                             resultado.pedidosFiltrados++;
                             continue;
                         }
                     }
+
+                    // Filtrar por ventana de tiempo si se especificó
+//                    if (horaInicio != null && horaFin != null) {
+//                        if (pedido.getFechaPedido().isBefore(horaInicio) ||
+//                                pedido.getFechaPedido().isAfter(horaFin)) {
+//                            resultado.pedidosFiltrados++;
+//                            continue;
+//                        }
+//                    }
 
                     pedidosPorCrear.add(pedido);
 

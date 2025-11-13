@@ -1,6 +1,7 @@
 package com.grupo5e.morapack.controller;
 
 import com.grupo5e.morapack.service.DataImportService;
+import com.grupo5e.morapack.utils.ModoSimulacion;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -162,10 +163,13 @@ public class DataImportController {
     public ResponseEntity<Map<String, Object>> uploadOrders(
             @Parameter(description = "Archivo pedidos.txt o _pedidos_{AIRPORT}_.txt")
             @RequestParam("file") MultipartFile file,
-            @Parameter(description = "Hora de inicio para filtrar pedidos (ISO 8601, opcional)", example = "2025-01-02T00:00:00")
+            @Parameter(description = "Hora de inicio (solo para modo SEMANAL)", example = "2025-01-02T00:00:00")
             @RequestParam(required = false) String horaInicio,
-            @Parameter(description = "Hora de fin para filtrar pedidos (ISO 8601, opcional)", example = "2025-01-09T00:00:00")
-            @RequestParam(required = false) String horaFin) {
+            @Parameter(description = "Hora de fin (solo para modo SEMANAL)", example = "2025-01-09T00:00:00")
+            @RequestParam(required = false) String horaFin,
+            @Parameter(description = "Modo de simulación: SEMANAL o COLAPSO", example = "SEMANAL")
+            @RequestParam String modo)
+    {
         
         String filename = file.getOriginalFilename();
         log.info("📤 Recibida solicitud de importación de pedidos: {}", filename);
@@ -209,9 +213,20 @@ public class DataImportController {
             log.warn("❌ Error parseando fechas: {}", e.getMessage());
             return ResponseEntity.badRequest().body(error);
         }
-        
+        // Validar modo de simulación
+        ModoSimulacion modoSimulacion;
+        try {
+            modoSimulacion = ModoSimulacion.valueOf(modo.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", "Modo de simulación inválido. Use SEMANAL o COLAPSO");
+            return ResponseEntity.badRequest().body(error);
+        }
+
         // Procesar e insertar en BD con filtrado opcional
-        Map<String, Object> result = dataImportService.importOrders(file, horaInicioDateTime, horaFinDateTime);
+        Map<String, Object> result = dataImportService.importOrders(file, horaInicioDateTime, horaFinDateTime,
+                modoSimulacion);
         
         boolean success = (boolean) result.get("success");
         HttpStatus status = success ? HttpStatus.OK : HttpStatus.BAD_REQUEST;

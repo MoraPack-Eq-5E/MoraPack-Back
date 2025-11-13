@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.*;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 
 /**
  * Evento temporal en la simulación de vuelos.
@@ -53,5 +54,10 @@ public class EventoLineaDeTiempoVueloDTO {
     
     @Schema(description = "Tiempo de transporte en días")
     private Double tiempoTransporteDias;
+
+    @Schema(description = "Descripción legible del evento")
+    private String descripcion;
+
+    private Map<String, Object> metricas;
 }
 

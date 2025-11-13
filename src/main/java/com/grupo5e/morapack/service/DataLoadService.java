@@ -2,6 +2,7 @@ package com.grupo5e.morapack.service;
 
 import com.grupo5e.morapack.core.model.Aeropuerto;
 import com.grupo5e.morapack.utils.LectorPedidosV2;
+import com.grupo5e.morapack.utils.ModoSimulacion;
 import lombok.*;
 import org.springframework.stereotype.Service;
 
@@ -46,7 +47,8 @@ public class DataLoadService {
     public ResultadoCargaDatos cargarPedidosDesdeArchivos(
             String directorioArchivos,
             LocalDateTime horaInicioSimulacion,
-            LocalDateTime horaFinSimulacion) {
+            LocalDateTime horaFinSimulacion,
+            ModoSimulacion modoSimulacion) {
 
         log.info("========================================");
         log.info("CARGANDO PEDIDOS DESDE ARCHIVOS A BASE DE DATOS");
@@ -84,7 +86,7 @@ public class DataLoadService {
             );
 
             LectorPedidosV2.ResultadoCargaPedidos resultadoLector = 
-                    lector.leerYGuardarPedidos(horaInicioSimulacion, horaFinSimulacion);
+                    lector.leerYGuardarPedidos(horaInicioSimulacion, horaFinSimulacion,modoSimulacion);
 
             // Mapear resultado del lector al resultado del servicio
             resultado.exito = resultadoLector.exito;

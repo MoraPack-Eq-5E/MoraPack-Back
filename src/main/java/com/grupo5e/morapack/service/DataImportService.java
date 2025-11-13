@@ -9,10 +9,7 @@ import com.grupo5e.morapack.core.validation.PACKTimeValidator;
 import com.grupo5e.morapack.repository.CiudadRepository;
 import com.grupo5e.morapack.repository.ClienteRepository;
 import com.grupo5e.morapack.repository.ProductoRepository;
-import com.grupo5e.morapack.utils.LectorAeropuerto;
-import com.grupo5e.morapack.utils.LectorPedidos;
-import com.grupo5e.morapack.utils.LectorPedidosV2;
-import com.grupo5e.morapack.utils.LectorVuelos;
+import com.grupo5e.morapack.utils.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -346,7 +343,8 @@ public class DataImportService {
      * @return Map con success, message, count
      */
     @Transactional
-    public Map<String, Object> importOrders(MultipartFile file, LocalDateTime horaInicio, LocalDateTime horaFin) {
+    public Map<String, Object> importOrders(MultipartFile file, LocalDateTime horaInicio, LocalDateTime horaFin,
+                                            ModoSimulacion modoSimulacion) {
         Map<String, Object> result = new HashMap<>();
         Path tempFile = null;
         Path tempDir = null;
@@ -404,8 +402,19 @@ public class DataImportService {
                 );
                 
                 // Cargar con filtros de tiempo si se especificaron
-                LectorPedidosV2.ResultadoCargaPedidos resultadoCarga = 
-                    lectorV2.leerYGuardarPedidos(horaInicio, horaFin);
+                LectorPedidosV2.ResultadoCargaPedidos resultadoCarga;
+
+//                if (modoSimulacion == ModoSimulacion.COLAPSO) {
+//                    // 🌀 Simulación por colapso: cargar TODOS los pedidos
+//                    log.info("   🌀 Modo COLAPSO: cargando todos los pedidos sin filtrado por tiempo...");
+//                    resultadoCarga = lectorV2.leerYGuardarPedidos(null, null);
+//                } else {
+//                    // ⏰ Simulación semanal: usar ventana de tiempo
+//                    resultadoCarga = lectorV2.leerYGuardarPedidos(horaInicio, horaFin);
+//                }
+
+
+                resultadoCarga = lectorV2.leerYGuardarPedidos(horaInicio, horaFin,modoSimulacion);
                 
                 if (!resultadoCarga.exito) {
                     result.put("success", false);

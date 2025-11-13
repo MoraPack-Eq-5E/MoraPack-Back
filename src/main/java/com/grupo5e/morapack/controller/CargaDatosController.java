@@ -1,6 +1,7 @@
 package com.grupo5e.morapack.controller;
 
 import com.grupo5e.morapack.service.DataLoadService;
+import com.grupo5e.morapack.utils.ModoSimulacion;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -81,7 +82,9 @@ public class CargaDatosController {
             @Parameter(description = "Hora de fin para filtrar pedidos (ISO 8601)", example = "2025-01-02T01:00:00")
             @RequestParam(required = false)
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
-            LocalDateTime horaFin) {
+            LocalDateTime horaFin,
+            @Parameter(description = "Modo de simulación: SEMANAL o COLAPSO", example = "SEMANAL")
+            @RequestParam(required = false, defaultValue = "SEMANAL") String modo){
 
         // OPTIMIZACIÓN: Agregar logging específico sin sobrecarga
         long inicioTiempo = System.currentTimeMillis();
@@ -99,9 +102,10 @@ public class CargaDatosController {
                 log.info("Ventana de tiempo: {} a {}", horaInicio, horaFin);
             }
 
+            ModoSimulacion modoSimulacion = ModoSimulacion.valueOf(modo);
             // Cargar pedidos
             DataLoadService.ResultadoCargaDatos resultado =
-                dataLoadService.cargarPedidosDesdeArchivos(rutaDirectorio, horaInicio, horaFin);
+                dataLoadService.cargarPedidosDesdeArchivos(rutaDirectorio, horaInicio, horaFin,modoSimulacion);
 
             // Construir respuesta
             Map<String, Object> respuesta = new HashMap<>();

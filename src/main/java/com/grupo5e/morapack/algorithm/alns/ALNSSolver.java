@@ -2,6 +2,8 @@ package com.grupo5e.morapack.algorithm.alns;
 
 import com.grupo5e.morapack.algorithm.input.FuenteDatosInput;
 import com.grupo5e.morapack.algorithm.input.FabricaFuenteDatos;
+import com.grupo5e.morapack.api.dto.EventoLineaDeTiempoVueloDTO;
+import com.grupo5e.morapack.api.dto.LineaDeTiempoSimulacionDTO;
 import com.grupo5e.morapack.core.model.*;
 import com.grupo5e.morapack.core.model.Pedido;
 import com.grupo5e.morapack.core.constants.Constantes;
@@ -88,6 +90,17 @@ public class ALNSSolver {
     // Horizon days
     private static final int HORIZON_DAYS = 4;
     private static final boolean DEBUG_MODE = false;
+
+    // Campos adicionales para modo colapso
+    private boolean modoColapso = false;
+    private int iteracionesColapso = 0;
+    private int maxIteracionesColapso = 1000; // Máximo de iteraciones en modo colapso
+    private LocalDateTime horaInicioColapso;
+    private Map<String, Object> metricasColapso = new HashMap<>();
+
+    // En la clase ALNSSolver, agregar estos campos:
+    private List<EventoSimulacion> eventosColapso;
+    private boolean capturandoTimelineColapso = false;
 
     /**
      * Constructor principal simplificado que usa FuenteDatosInput modular.
@@ -2543,6 +2556,924 @@ public class ALNSSolver {
 
         return null;
     }
+    //===============================NUEVOS METODOS PARA COLAPSO===========================================
+    // Dentro del método ejecutarModoColapso(), agregar:
+    public Map<String, Object> ejecutarModoColapso() {
+        System.out.println("🚨 INICIANDO MODO COLAPSO OPTIMIZADO 🚨");
+
+        // ✅ CONFIGURACIÓN OPTIMIZADA
+        this.modoColapso = true;
+        this.horaInicioColapso = LocalDateTime.now();
+        this.eventosColapso = new ArrayList<>();
+        this.capturandoTimelineColapso = true;
+
+        // ✅ PARÁMETROS OPTIMIZADOS PARA GRANDES VOLÚMENES
+        int maxEventosEnMemoria = 200;
+        int intervaloMuestreo = calcularIntervaloMuestreoOptimo();
+
+        System.out.println("📊 Configuración optimizada:");
+        System.out.println("   - Máximo eventos: " + maxEventosEnMemoria);
+        System.out.println("   - Intervalo muestreo: " + intervaloMuestreo + " iteraciones");
+        System.out.println("   - Pedidos totales: " + pedidos.size());
+        System.out.println("   - Horizonte días: " + HORIZON_DAYS);
+
+        // Inicializar solución
+        generarSolucionInicial();
+
+        // Ejecutar simulación optimizada
+        ejecutarHastaColapsoOptimizado(intervaloMuestreo, maxEventosEnMemoria);
+
+        // ✅ TIMELINE COMPRIMIDO
+        LineaDeTiempoSimulacionDTO timeline = construirTimelineComprimido();
+        metricasColapso.put("timelineColapso", timeline);
+        metricasColapso.put("eventosOriginales", eventosColapso.size());
+        metricasColapso.put("eventosEnTimeline", timeline.getEventos().size());
+
+        // Recolectar métricas finales
+        recolectarMetricasColapso();
+
+        imprimirEstadisticasColapso(solucion,iteracionesColapso);
+        System.out.println("✅ MODO COLAPSO OPTIMIZADO COMPLETADO");
+        System.out.println("   Eventos capturados: " + eventosColapso.size());
+        System.out.println("   Eventos en timeline: " + timeline.getEventos().size());
+
+        return metricasColapso;
+    }
+    // ✅ NUEVO MÉTODO PARA IMPRIMIR ESTADÍSTICAS DE COLAPSO
+    private void imprimirEstadisticasColapso(HashMap<HashMap<Pedido, ArrayList<Vuelo>>, Integer> solucionActual, int iteracion) {
+        int pedidosAsignados = solucionActual.keySet().iterator().next().size();
+        System.out.println("\n=== ESTADÍSTICAS COLAPSO - Iteración " + iteracion + " ===");
+        System.out.println("Pedidos asignados: " + pedidosAsignados + "/" + pedidos.size() +
+                " (" + String.format("%.1f%%", (double)pedidosAsignados/pedidos.size()*100) + ")");
+        System.out.println("Almacenes llenos: " + contarAlmacenesLlenos() + "/" + aeropuertos.size());
+        System.out.println("Vuelos saturados: " + contarVuelosSaturados() + "/" + vuelos.size());
+        System.out.println("Pedidos críticos no asignados: " + contarPedidosCriticosNoAsignados());
+        System.out.println("Temperatura: " + String.format("%.2f", temperatura));
+        System.out.println("====================================\n");
+    }
+    private int calcularIntervaloMuestreoOptimo() {
+        int totalPedidos = pedidos.size();
+        if (totalPedidos > 10000) return 100;
+        if (totalPedidos > 5000) return 50;
+        if (totalPedidos > 1000) return 25;
+        return 10;
+    }
+    private void ejecutarHastaColapsoOptimizado(int intervaloMuestreo, int maxEventosEnMemoria) {
+        if (solucion.isEmpty()) {
+            System.out.println("Error: No hay solución inicial para modo colapso");
+            return;
+        }
+
+        Map.Entry<HashMap<Pedido, ArrayList<Vuelo>>, Integer> primeraEntrada =
+                solucion.entrySet().iterator().next();
+        HashMap<Pedido, ArrayList<Vuelo>> solucionActual = new HashMap<>(primeraEntrada.getKey());
+        int pesoActual = primeraEntrada.getValue();
+
+        mejorSolucion = new HashMap<>(solucion);
+        inicializarPoolNoAsignados();
+
+        // ✅ CAPTURAR ESTADO INICIAL
+        capturarEstadoColapsoOptimizado("INICIO", 0, solucionActual);
+
+        boolean colapsoDetectado = false;
+
+        for (iteracionesColapso = 1;
+             iteracionesColapso < maxIteracionesColapso && !colapsoDetectado;
+             iteracionesColapso++) {
+
+            // ✅ CAPTURAR ESTADO OPTIMIZADO - Solo en intervalos específicos
+            if (iteracionesColapso % intervaloMuestreo == 0) {
+                capturarEstadoColapsoOptimizado("EJECUCION", iteracionesColapso, solucionActual);
+            }
+            // ✅ GESTIONAR MEMORIA CADA 50 ITERACIONES
+            if (iteracionesColapso % 50 == 0) {
+                gestionarMemoriaTimeline();
+            }
+            // ✅ EJECUTAR ITERACIÓN NORMAL PRIMERO
+            ejecutarIteracionALNSColapso(solucionActual, pesoActual, iteracionesColapso);
+
+            // ✅ VERIFICAR COLAPSO CADA 25 ITERACIONES (NO CADA 10)
+            if (iteracionesColapso % 25 == 0) {
+                colapsoDetectado = verificarCondicionesColapso(solucionActual, iteracionesColapso);
+
+                if (colapsoDetectado) {
+                    capturarEstadoColapsoOptimizado("COLAPSO_DETECTADO", iteracionesColapso, solucionActual);
+                    break;
+                }
+            }
+
+            // ✅ ACTUALIZAR MÉTRICAS PERIÓDICAMENTE
+            if (iteracionesColapso % 50 == 0) {
+                actualizarMetricasColapso(solucionActual, iteracionesColapso);
+
+                // Log de progreso
+                if (iteracionesColapso % 100 == 0) {
+                    System.out.println("📊 Progreso colapso - Iteración: " + iteracionesColapso +
+                            ", Asignados: " + solucionActual.size() + "/" + pedidos.size() +
+                            " (" + String.format("%.1f%%",
+                            (double)solucionActual.size()/pedidos.size()*100) + ")");
+                }
+            }
+        }
+
+        // ✅ SI LLEGAMOS AL MÁXIMO SIN COLAPSO
+        if (!colapsoDetectado && iteracionesColapso >= maxIteracionesColapso) {
+            capturarEstadoColapsoOptimizado("MAX_ITERACIONES", iteracionesColapso, solucionActual);
+            metricasColapso.put("tipoColapso", "MAX_ITERACIONES_ALCANZADO");
+            System.out.println("⚠️ Colapso por máximo de iteraciones alcanzado");
+        }
+
+        solucion.clear();
+        solucion.putAll(mejorSolucion);
+    }
+    /**
+     * Captura el estado actual de la simulación para el timeline
+     */
+    private void capturarEstadoColapsoOptimizado(String fase, int iteracion,
+                                       HashMap<Pedido, ArrayList<Vuelo>> solucionActual) {
+        if (!capturandoTimelineColapso) return;
+
+        // ✅ CAPTURAR MÁS EVENTOS PARA MEJOR VISUALIZACIÓN
+        boolean esEventoImportante =
+                fase.equals("COLAPSO_DETECTADO") ||
+                fase.equals("INICIO") ||
+                fase.equals("MAX_ITERACIONES") ||
+                (iteracion % 25 == 0) || // Cada 50 iteraciones
+                detectarCambioSignificativo(iteracion, solucionActual);
+
+        if (!esEventoImportante) return;
+
+        try {
+            EventoSimulacion evento = new EventoSimulacion();
+            evento.setFase(fase);
+            evento.setIteracion(iteracion);
+            evento.setTimestamp(LocalDateTime.now());
+            evento.setPedidosAsignados(solucionActual.size());
+            evento.setPedidosTotales(pedidos.size());
+
+            // Calcular métricas críticas
+            evento.setAlmacenesLlenos(contarAlmacenesLlenos());
+            evento.setVuelosSaturados(contarVuelosSaturados());
+            evento.setPedidosCriticosNoAsignados(contarPedidosCriticosNoAsignados());
+
+            // ✅ SOLO CAPTURAR RUTAS EN EVENTOS CRÍTICOS
+            if (fase.equals("COLAPSO_DETECTADO") || iteracion % 100 == 0) {
+                evento.setRutasMuestreadas(obtenerMuestraRutas(solucionActual, 20)); // Solo 20 rutas de muestra
+            }
+
+            eventosColapso.add(evento);
+
+            if (Constantes.LOGGING_VERBOSO) {
+                System.out.println("📅 Colapso Timeline - " + fase + " @ iter " + iteracion +
+                        " - Asignados: " + solucionActual.size() + "/" + pedidos.size());
+            }
+        } catch (Exception e) {
+            System.err.println("Error capturando estado de colapso: " + e.getMessage());
+        }
+    }
+    // ✅ MUESTREO DE RUTAS REPRESENTATIVAS
+    private HashMap<Pedido, ArrayList<Vuelo>> obtenerMuestraRutas(
+            HashMap<Pedido, ArrayList<Vuelo>> solucionActual, int maxMuestra) {
+
+        if (solucionActual.isEmpty()) {
+            return new HashMap<>();
+        }
+
+        List<Map.Entry<Pedido, ArrayList<Vuelo>>> entradas = new ArrayList<>(solucionActual.entrySet());
+
+        // Ordenar por: 1. Problemas de ruta, 2. Prioridad, 3. Urgencia
+        entradas.sort((e1, e2) -> {
+            // Priorizar pedidos con problemas
+            boolean e1Problema = tieneProblemasRuta(e1.getKey(), e1.getValue());
+            boolean e2Problema = tieneProblemasRuta(e2.getKey(), e2.getValue());
+            if (e1Problema && !e2Problema) return -1;
+            if (!e1Problema && e2Problema) return 1;
+
+            // Luego por prioridad (mayor primero)
+            int prioridadComp = Double.compare(e2.getKey().getPrioridad(), e1.getKey().getPrioridad());
+            if (prioridadComp != 0) return prioridadComp;
+
+            // Luego por urgencia (deadline más cercano primero)
+            if (e1.getKey().getFechaLimiteEntrega() != null && e2.getKey().getFechaLimiteEntrega() != null) {
+                int urgenciaComp = e1.getKey().getFechaLimiteEntrega().compareTo(e2.getKey().getFechaLimiteEntrega());
+                if (urgenciaComp != 0) return urgenciaComp;
+            }
+
+            return Integer.compare(e1.getKey().getId(), e2.getKey().getId());
+        });
+
+        // Tomar muestra limitada
+        int muestraSize = Math.min(maxMuestra, entradas.size());
+        HashMap<Pedido, ArrayList<Vuelo>> muestra = new HashMap<>();
+
+        for (int i = 0; i < muestraSize; i++) {
+            Map.Entry<Pedido, ArrayList<Vuelo>> entrada = entradas.get(i);
+            muestra.put(entrada.getKey(), entrada.getValue());
+        }
+
+        return muestra;
+    }
+    private boolean tieneProblemasRuta(Pedido pedido, ArrayList<Vuelo> ruta) {
+        if (ruta == null || ruta.isEmpty()) return true;
+
+        // Verificar si la ruta tiene problemas de capacidad
+        for (Vuelo vuelo : ruta) {
+            double utilizacion = (double) vuelo.getCapacidadUsada() / vuelo.getCapacidadMaxima();
+            if (utilizacion > 0.9) return true;
+        }
+
+        // Verificar si incumple deadline
+        return !seRespetaDeadline(pedido, ruta);
+    }
+
+    private boolean detectarCambioSignificativo(int iteracion,
+                                                HashMap<Pedido, ArrayList<Vuelo>> solucionActual) {
+        if (eventosColapso.isEmpty()) return true;
+
+        EventoSimulacion ultimoEvento = eventosColapso.get(eventosColapso.size() - 1);
+
+        // Cambio significativo si:
+        // - Más de 10% cambio en asignaciones
+        int cambioAsignaciones = Math.abs(solucionActual.size() - ultimoEvento.getPedidosAsignados());
+        double porcentajeCambio = (double) cambioAsignaciones / ultimoEvento.getPedidosAsignados();
+
+        return porcentajeCambio > 0.1 ||
+                contarAlmacenesLlenos() > ultimoEvento.getAlmacenesLlenos() + 2;
+    }
+    /**
+     * Construye el DTO de timeline para el frontend
+     */
+    private LineaDeTiempoSimulacionDTO construirTimelineComprimido() {
+        System.out.println("🔄 Construyendo timeline CON RUTAS para colapso con " + eventosColapso.size() + " eventos...");
+
+        if (eventosColapso.isEmpty()) {
+            return construirTimelineVacio();
+        }
+
+        List<EventoLineaDeTiempoVueloDTO> eventosDTO = new ArrayList<>();
+        Set<Integer> aeropuertosUnicos = new HashSet<>();
+
+        // ✅ PROCESAR CADA EVENTO DE COLAPSO Y AGREGAR EVENTOS DE VUELO REALES
+        for (EventoSimulacion eventoColapso : eventosColapso) {
+            // 1. Primero agregar el evento de estado de simulación (como antes)
+            EventoLineaDeTiempoVueloDTO eventoTimeline = crearEventoAgregado(eventoColapso,
+                    eventoColapso.getFase() + "-" + eventoColapso.getIteracion());
+            eventosDTO.add(eventoTimeline);
+
+            // 2. ✅ NUEVO: AGREGAR EVENTOS DE VUELO REALES SI HAY RUTAS MUESTREADAS
+            if (eventoColapso.getRutasMuestreadas() != null &&
+                    !eventoColapso.getRutasMuestreadas().isEmpty()) {
+
+                List<EventoLineaDeTiempoVueloDTO> eventosVuelo =
+                        convertirRutasAEventosTimeline(eventoColapso.getRutasMuestreadas(),
+                                eventoColapso.getTimestamp());
+
+                eventosDTO.addAll(eventosVuelo);
+
+                // Recolectar aeropuertos únicos de los eventos de vuelo
+                for (EventoLineaDeTiempoVueloDTO eventoVuelo : eventosVuelo) {
+                    if (eventoVuelo.getIdAeropuertoOrigen() != null) {
+                        aeropuertosUnicos.add(eventoVuelo.getIdAeropuertoOrigen());
+                    }
+                    if (eventoVuelo.getIdAeropuertoDestino() != null) {
+                        aeropuertosUnicos.add(eventoVuelo.getIdAeropuertoDestino());
+                    }
+                }
+
+                System.out.println("   ✅ Evento " + eventoColapso.getFase() + " - " +
+                        eventosVuelo.size() + " eventos de vuelo agregados");
+            }
+        }
+
+        // ✅ ORDENAR POR TIEMPO Y LIMITAR
+        eventosDTO.sort(Comparator.comparing(EventoLineaDeTiempoVueloDTO::getHoraEvento));
+
+        // Limitar a 200 eventos máximo para el frontend (más generoso para incluir vuelos)
+        if (eventosDTO.size() > 200) {
+            eventosDTO = eventosDTO.subList(0, 200);
+            System.out.println("📦 Timeline comprimido a " + eventosDTO.size() + " eventos");
+        }
+
+        // Calcular tiempos finales
+        LocalDateTime horaInicio = eventosDTO.get(0).getHoraEvento();
+        LocalDateTime horaFin = eventosDTO.get(eventosDTO.size() - 1).getHoraEvento();
+        long duracionMinutos = ChronoUnit.MINUTES.between(horaInicio, horaFin);
+
+        System.out.println("✅ Timeline final: " + eventosDTO.size() + " eventos, " +
+                aeropuertosUnicos.size() + " aeropuertos, " +
+                duracionMinutos + " minutos");
+
+        return LineaDeTiempoSimulacionDTO.builder()
+                .horaInicioSimulacion(horaInicio)
+                .horaFinSimulacion(horaFin)
+                .duracionTotalMinutos(duracionMinutos)
+                .eventos(eventosDTO)
+                .totalEventos(eventosDTO.size())
+                .totalAeropuertos(aeropuertosUnicos.size())
+                .build();
+    }
+    private LineaDeTiempoSimulacionDTO construirTimelineVacio() {
+        return LineaDeTiempoSimulacionDTO.builder()
+                .horaInicioSimulacion(horaInicioColapso)
+                .horaFinSimulacion(LocalDateTime.now())
+                .duracionTotalMinutos(0L)
+                .eventos(Collections.emptyList())
+                .totalEventos(0)
+                .totalAeropuertos(0)
+                .build();
+    }
+    /**
+     * ✅ NUEVO MÉTODO: Convierte rutas muestreadas a eventos de timeline REALES para el mapa
+     */
+    private List<EventoLineaDeTiempoVueloDTO> convertirRutasAEventosTimeline(
+            Map<Pedido, ArrayList<Vuelo>> rutasMuestreadas,
+            LocalDateTime timestampBase) {
+
+        List<EventoLineaDeTiempoVueloDTO> eventosVuelo = new ArrayList<>();
+
+        if (rutasMuestreadas == null || rutasMuestreadas.isEmpty()) {
+            return eventosVuelo;
+        }
+
+        int contadorEvento = 0;
+        LocalDateTime tiempoActual = timestampBase;
+
+        System.out.println("   🗺️ Convirtiendo " + rutasMuestreadas.size() + " rutas a eventos de mapa...");
+
+        for (Map.Entry<Pedido, ArrayList<Vuelo>> entrada : rutasMuestreadas.entrySet()) {
+            Pedido pedido = entrada.getKey();
+            ArrayList<Vuelo> vuelos = entrada.getValue();
+
+            if (vuelos == null || vuelos.isEmpty()) {
+                continue;
+            }
+
+            // Procesar cada vuelo en la ruta
+            for (int i = 0; i < vuelos.size(); i++) {
+                Vuelo vuelo = vuelos.get(i);
+
+                // ✅ EVENTO DE SALIDA (DEPARTURE)
+                EventoLineaDeTiempoVueloDTO eventoSALIDA = EventoLineaDeTiempoVueloDTO.builder()
+                        .idEvento("COLAPSO-DEP-" + contadorEvento++)
+                        .tipoEvento("DEPARTURE")  // ✅ CRÍTICO: Tipo para el mapa
+                        .horaEvento(tiempoActual)
+                        .idVuelo(vuelo.getId())
+                        .codigoVuelo(construirCodigoVuelo(vuelo))
+                        .idProducto(obtenerIdProductoRepresentativo(pedido))
+                        .idPedido(pedido.getId())
+                        .ciudadOrigen(vuelo.getAeropuertoOrigen() != null ?
+                                vuelo.getAeropuertoOrigen().getCiudad().getNombre() : "Desconocido")
+                        .ciudadDestino(vuelo.getAeropuertoDestino() != null ?
+                                vuelo.getAeropuertoDestino().getCiudad().getNombre() : "Desconocido")
+                        .idAeropuertoOrigen(vuelo.getAeropuertoOrigen() != null ?
+                                vuelo.getAeropuertoOrigen().getId() : null)
+                        .idAeropuertoDestino(vuelo.getAeropuertoDestino() != null ?
+                                vuelo.getAeropuertoDestino().getId() : null)
+                        .tiempoTransporteDias(vuelo.getTiempoTransporte() / 24.0)
+                        .descripcion(construirDescripcionVuelo(vuelo, "salida"))
+                        .build();
+
+                eventosVuelo.add(eventoSALIDA);
+
+                // ✅ EVENTO DE LLEGADA (ARRIVAL)
+                LocalDateTime horaLlegada = tiempoActual.plusMinutes(
+                        (long)(vuelo.getTiempoTransporte() * 60));
+
+                EventoLineaDeTiempoVueloDTO eventoLLEGADA = EventoLineaDeTiempoVueloDTO.builder()
+                        .idEvento("COLAPSO-ARR-" + contadorEvento++)
+                        .tipoEvento("ARRIVAL")  // ✅ CRÍTICO: Tipo para el mapa
+                        .horaEvento(horaLlegada)
+                        .idVuelo(vuelo.getId())
+                        .codigoVuelo(construirCodigoVuelo(vuelo))
+                        .idProducto(obtenerIdProductoRepresentativo(pedido))
+                        .idPedido(pedido.getId())
+                        .ciudadOrigen(vuelo.getAeropuertoOrigen() != null ?
+                                vuelo.getAeropuertoOrigen().getCiudad().getNombre() : "Desconocido")
+                        .ciudadDestino(vuelo.getAeropuertoDestino() != null ?
+                                vuelo.getAeropuertoDestino().getCiudad().getNombre() : "Desconocido")
+                        .idAeropuertoOrigen(vuelo.getAeropuertoOrigen() != null ?
+                                vuelo.getAeropuertoOrigen().getId() : null)
+                        .idAeropuertoDestino(vuelo.getAeropuertoDestino() != null ?
+                                vuelo.getAeropuertoDestino().getId() : null)
+                        .tiempoTransporteDias(vuelo.getTiempoTransporte() / 24.0)
+                        .descripcion(construirDescripcionVuelo(vuelo, "llegada"))
+                        .build();
+
+                eventosVuelo.add(eventoLLEGADA);
+
+                // Actualizar tiempo para próximo vuelo (incluir escala)
+                tiempoActual = horaLlegada.plusMinutes(60); // 1 hora de escala
+            }
+        }
+
+        System.out.println("   ✅ Generados " + eventosVuelo.size() + " eventos de vuelo a partir de rutas");
+        return eventosVuelo;
+    }
+    //OJITO
+    /**
+     * Obtiene un ID de producto representativo del pedido
+     */
+    private Integer obtenerIdProductoRepresentativo(Pedido pedido) {
+        if (pedido.getProductos() != null && !pedido.getProductos().isEmpty()) {
+            return pedido.getProductos().get(0).getId();
+        }
+        return pedido.getId() * 1000; // ID derivado del pedido
+    }
+
+    /**
+     * Construye código de vuelo legible
+     */
+    private String construirCodigoVuelo(Vuelo vuelo) {
+        if (vuelo.getAeropuertoOrigen() == null || vuelo.getAeropuertoDestino() == null) {
+            return "VUELO-" + vuelo.getId();
+        }
+
+        String origen = vuelo.getAeropuertoOrigen().getCodigoIATA();
+        String destino = vuelo.getAeropuertoDestino().getCodigoIATA();
+
+        return "VL" + origen + "-" + destino + "-" + vuelo.getId();
+    }
+
+    /**
+     * Construye descripción legible para eventos de vuelo
+     */
+    private String construirDescripcionVuelo(Vuelo vuelo, String tipo) {
+        String origen = vuelo.getAeropuertoOrigen() != null ?
+                vuelo.getAeropuertoOrigen().getCiudad().getNombre() : "Origen desconocido";
+        String destino = vuelo.getAeropuertoDestino() != null ?
+                vuelo.getAeropuertoDestino().getCiudad().getNombre() : "Destino desconocido";
+
+        if ("salida".equals(tipo)) {
+            return String.format("Salida de %s hacia %s (%.1f horas)",
+                    origen, destino, vuelo.getTiempoTransporte());
+        } else {
+            return String.format("Llegada a %s desde %s", destino, origen);
+        }
+    }
+    //TERMINAR OJITO
+    // ✅ CREAR EVENTO AGREGADO PARA TIMELINE
+    private EventoLineaDeTiempoVueloDTO crearEventoAgregado(EventoSimulacion evento, String claveGrupo) {
+        return EventoLineaDeTiempoVueloDTO.builder()
+                .idEvento("COLAPSO-" + claveGrupo + "-" + evento.getIteracion())
+                .tipoEvento("ESTADO_SIMULACION")
+                .horaEvento(evento.getTimestamp())
+                .ciudadOrigen("SISTEMA")
+                .ciudadDestino("SISTEMA")
+                .codigoVuelo("FASE-" + evento.getFase())
+                .descripcion(construirDescripcionEvento(evento))
+                .metricas(construirMetricasEvento(evento))
+                .build();
+    }
+    private Map<String, Object> comprimirRutaIndividual(Pedido pedido, ArrayList<Vuelo> ruta) {
+        Map<String, Object> rutaComprimida = new HashMap<>();
+        rutaComprimida.put("pedidoId", pedido.getId());
+        rutaComprimida.put("prioridad", pedido.getPrioridad());
+        rutaComprimida.put("numVuelos", ruta.size());
+
+        // Solo información esencial de la ruta
+        if (!ruta.isEmpty()) {
+            rutaComprimida.put("origen", ruta.get(0).getAeropuertoOrigen().getCodigoIATA());
+            rutaComprimida.put("destino", ruta.get(ruta.size()-1).getAeropuertoDestino().getCodigoIATA());
+        }
+
+        return rutaComprimida;
+    }
+    // ✅ GESTIÓN DE MEMORIA OPTIMIZADA
+    private void gestionarMemoriaTimeline() {
+        if (eventosColapso.size() > 500) {
+            System.out.println("🧹 Optimizando memoria timeline: " + eventosColapso.size() + " eventos");
+
+            // Mantener eventos críticos
+            List<EventoSimulacion> eventosCriticos = eventosColapso.stream()
+                    .filter(e -> e.getFase().equals("COLAPSO_DETECTADO") ||
+                            e.getFase().equals("INICIO") ||
+                            e.getFase().equals("MAX_ITERACIONES") ||
+                            e.getAlmacenesLlenos() > 0 ||
+                            e.getVuelosSaturados() > 10)
+                    .collect(Collectors.toList());
+
+            // Para eventos regulares, tomar muestra representativa
+            List<EventoSimulacion> eventosRegulares = eventosColapso.stream()
+                    .filter(e -> !eventosCriticos.contains(e))
+                    .collect(Collectors.toList());
+
+            // Ordenar eventos regulares por importancia y tomar muestra
+            eventosRegulares.sort((e1, e2) -> {
+                int importancia1 = e1.getAlmacenesLlenos() + e1.getVuelosSaturados() + e1.getPedidosCriticosNoAsignados();
+                int importancia2 = e2.getAlmacenesLlenos() + e2.getVuelosSaturados() + e2.getPedidosCriticosNoAsignados();
+                return Integer.compare(importancia2, importancia1);
+            });
+
+            int mantenerRegulares = Math.min(100, eventosRegulares.size());
+
+            eventosColapso.clear();
+            eventosColapso.addAll(eventosCriticos);
+            eventosColapso.addAll(eventosRegulares.subList(0, mantenerRegulares));
+
+            System.out.println("✅ Memoria optimizada: " + eventosColapso.size() + " eventos");
+        }
+    }
+    // ✅ MÉTODOS AUXILIARES PARA DESCRIPCIÓN Y MÉTRICAS
+    private String construirDescripcionEvento(EventoSimulacion evento) {
+        return String.format("Iteración %d: %d/%d pedidos asignados, %d almacenes llenos, %d vuelos saturados, %d pedidos críticos bloqueados",
+                evento.getIteracion(),
+                evento.getPedidosAsignados(),
+                evento.getPedidosTotales(),
+                evento.getAlmacenesLlenos(),
+                evento.getVuelosSaturados(),
+                evento.getPedidosCriticosNoAsignados());
+    }
+
+    private Map<String, Object> construirMetricasEvento(EventoSimulacion evento) {
+        Map<String, Object> metricas = new HashMap<>();
+        metricas.put("iteracion", evento.getIteracion());
+        metricas.put("pedidosAsignados", evento.getPedidosAsignados());
+        metricas.put("pedidosTotales", evento.getPedidosTotales());
+        metricas.put("porcentajeAsignacion",
+                (double) evento.getPedidosAsignados() / evento.getPedidosTotales() * 100);
+        metricas.put("almacenesLlenos", evento.getAlmacenesLlenos());
+        metricas.put("vuelosSaturados", evento.getVuelosSaturados());
+        metricas.put("pedidosCriticosNoAsignados", evento.getPedidosCriticosNoAsignados());
+        metricas.put("fase", evento.getFase());
+
+        // Comprimir rutas si existen
+        if (evento.getRutasMuestreadas() != null && !evento.getRutasMuestreadas().isEmpty()) {
+            metricas.put("rutasMuestreadas", comprimirRutasParaTimeline(evento.getRutasMuestreadas()));
+        }
+
+        return metricas;
+    }
+    // ✅ COMPRESIÓN DE RUTAS PARA TIMELINE
+    private Map<String, Object> comprimirRutasParaTimeline(Map<Pedido, ArrayList<Vuelo>> rutas) {
+        if (rutas == null || rutas.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        Map<String, Object> rutasComprimidas = new HashMap<>();
+
+        // Estadísticas agregadas en lugar de rutas individuales
+        rutasComprimidas.put("totalRutas", rutas.size());
+        rutasComprimidas.put("rutasDirectas",
+                rutas.values().stream().filter(r -> r.size() == 1).count());
+        rutasComprimidas.put("rutasConEscalas",
+                rutas.values().stream().filter(r -> r.size() > 1).count());
+        rutasComprimidas.put("rutasProblema",
+                rutas.values().stream().filter(r -> tieneProblemasRuta(rutas.keySet().iterator().next(), r)).count());
+
+        // Solo guardar información de rutas problemáticas (máximo 5)
+        List<Map<String, Object>> rutasProblema = rutas.entrySet().stream()
+                .filter(entry -> tieneProblemasRuta(entry.getKey(), entry.getValue()))
+                .limit(5)
+                .map(entry -> comprimirRutaIndividual(entry.getKey(), entry.getValue()))
+                .collect(Collectors.toList());
+
+        rutasComprimidas.put("rutasProblemaDetalle", rutasProblema);
+
+        return rutasComprimidas;
+    }
+
+    //=============================== CORRECCIÓN DE DETECCIÓN DE COLAPSO ================================
+    private boolean verificarCondicionesColapso(HashMap<Pedido, ArrayList<Vuelo>> solucionActual,
+                                                int iteracion) {
+        List<String> condiciones = new ArrayList<>();
+
+        // ✅ EVITAR DETECCIÓN PREMATURA - Mínimo 50 iteraciones
+        if (iteracion < 50) {
+            return false;
+        }
+
+        boolean colapsoDetectado = false;
+        String tipoColapso = "NO_COLAPSO";
+
+        // 1. Colapso por almacenes llenos - SOLO si hay un número significativo
+        int almacenesLlenos = contarAlmacenesLlenos();
+        int totalAlmacenes = aeropuertos.size();
+        double porcentajeAlmacenesLlenos = 0;
+
+        // ✅ NUEVO: Detectar si hay ALGÚN almacén lleno (más sensible)
+        if (almacenesLlenos > 0) {
+            porcentajeAlmacenesLlenos = (double) almacenesLlenos / totalAlmacenes * 100;
+            condiciones.add(String.format("ALMACENES_LLENOS:%d/%d (%.1f%%)",
+                    almacenesLlenos, totalAlmacenes, porcentajeAlmacenesLlenos));
+
+            // ✅ COLAPSO INMEDIATO si hay almacenes llenos críticos
+            if (almacenesLlenos >= 1) {
+                System.out.println("🚨 COLAPSO CRÍTICO: " + almacenesLlenos + " almacenes llenos");
+                colapsoDetectado = true;
+                tipoColapso = "ALMACENES_CRITICOS";
+            }
+        }
+
+        // 2. Colapso por vuelos saturados - SOLO si es significativo
+        int vuelosSaturados = contarVuelosSaturados();
+        int totalVuelos = vuelos.size();
+        double porcentajeVuelosSaturados = 0;
+
+        if (vuelosSaturados > 0) {
+            porcentajeVuelosSaturados = (double) vuelosSaturados / totalVuelos * 100;
+            condiciones.add(String.format("VUELOS_SATURADOS:%d/%d (%.1f%%)",
+                    vuelosSaturados, totalVuelos, porcentajeVuelosSaturados));
+
+            // ✅ COLAPSO si hay muchos vuelos saturados
+            if (vuelosSaturados >= 50) {
+                System.out.println("🚨 COLAPSO CRÍTICO: " + vuelosSaturados + " vuelos saturados");
+                colapsoDetectado = true;
+                tipoColapso = "VUELOS_CRITICOS";
+            }
+        }
+
+        // 3. Colapso por pedidos no asignados críticos - SOLO si hay muchos
+//        int pedidosCriticosNoAsignados = contarPedidosCriticosNoAsignados();
+//        int totalPedidosCriticos = contarTotalPedidosCriticos();
+//
+//        if (totalPedidosCriticos > 0) {
+//            double porcentajeCriticosBloqueados = (double) pedidosCriticosNoAsignados / totalPedidosCriticos * 100;
+//            if (porcentajeCriticosBloqueados > 50.0) { // Más del 50% de críticos bloqueados
+//                condiciones.add(String.format("PEDIDOS_CRITICOS_BLOQUEADOS:%d/%d (%.1f%%)",
+//                        pedidosCriticosNoAsignados, totalPedidosCriticos, porcentajeCriticosBloqueados));
+//            }
+//        }
+
+        // 4. Colapso por capacidad del sistema excedida - SOLO después de muchas iteraciones
+//        double porcentajeAsignacion = (double) solucionActual.size() / pedidos.size() * 100;
+//        if (porcentajeAsignacion < 20.0 && iteracion > 200) { // Menos del 20% después de 200 iteraciones
+//            condiciones.add(String.format("CAPACIDAD_SISTEMA_EXCEDIDA:%.1f%%", porcentajeAsignacion));
+//        }
+//
+//        // 5. Colapso por rutas inviables - SOLO si hay suficientes rutas asignadas
+//        int rutasInvalidas = contarRutasInvalidas(solucionActual);
+//        if (solucionActual.size() > 100) { // Solo evaluar si hay al menos 100 rutas
+//            double porcentajeRutasInvalidas = (double) rutasInvalidas / solucionActual.size() * 100;
+//            if (porcentajeRutasInvalidas > 40.0) { // Más del 40% de rutas inválidas
+//                condiciones.add(String.format("RUTAS_INVIABLES:%d/%d (%.1f%%)",
+//                        rutasInvalidas, solucionActual.size(), porcentajeRutasInvalidas));
+//            }
+//        }
+
+        // 6. Colapso por congestión temporal - SOLO si es grave
+//        if (detectarCongestionTemporalGrave()) {
+//            condiciones.add("CONGESTION_TEMPORAL_GRAVE");
+//        }
+//
+//        // ✅ REGISTRAR CONDICIONES PARA DEBUG (si hay alguna)
+//        if (!condiciones.isEmpty() && Constantes.LOGGING_VERBOSO) {
+//            System.out.println("🔍 Condiciones de colapso detectadas en iteración " + iteracion + ":");
+//            for (String condicion : condiciones) {
+//                System.out.println("   - " + condicion);
+//            }
+//        }
+
+        // ✅ CRITERIOS MÁS ESTRICTOS PARA COLAPSO
+
+        if (colapsoDetectado) {
+            metricasColapso.put("condicionesColapso", condiciones);
+            metricasColapso.put("iteracionColapso", iteracion);
+            metricasColapso.put("tipoColapso", tipoColapso);
+
+            System.out.println("🚨 COLAPSO DETECTADO - Tipo: " + tipoColapso + " en iteración " + iteracion);
+            for (String condicion : condiciones) {
+                System.out.println("   📍 " + condicion);
+            }
+        }
+
+        return colapsoDetectado;
+    }
+
+    // ✅ CORRECCIÓN DEL MÉTODO contarAlmacenesLlenos
+    private int contarAlmacenesLlenos() {
+        int count = 0;
+        for (Aeropuerto aeropuerto : aeropuertos) {
+            // ✅ VERIFICACIÓN UNIFICADA - usar siempre la misma fuente de capacidad
+            int capacidadActual = aeropuerto.getCapacidadActual();
+            int capacidadMaxima = aeropuerto.getCapacidadMaxima();
+
+            if (capacidadMaxima > 0) {
+                double utilizacion = (double) capacidadActual / capacidadMaxima * 100;
+
+                // ✅ MÁS SENSIBLE: 80% ya se considera "lleno" para detección de colapso
+                if (utilizacion >= 95.0) {
+                    if (Constantes.LOGGING_VERBOSO) {
+                        System.out.println("📦 Almacén lleno: " + aeropuerto.getCodigoIATA() +
+                                " - " + capacidadActual + "/" + capacidadMaxima +
+                                " (" + String.format("%.1f%%", utilizacion) + ")");
+                    }
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
+
+    // ✅ CORRECCIÓN DEL MÉTODO contarVuelosSaturados
+    private int contarVuelosSaturados() {
+        int count = 0;
+        for (Vuelo vuelo : vuelos) {
+            if (vuelo.getCapacidadMaxima() > 0) {
+                double utilizacion = (double) vuelo.getCapacidadUsada() / vuelo.getCapacidadMaxima() * 100;
+                if (utilizacion >= 90.0) { // 90% o más de capacidad
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
+    // ✅ NUEVO MÉTODO PARA CONTAR PEDIDOS CRÍTICOS TOTALES
+    private int contarTotalPedidosCriticos() {
+        int count = 0;
+        LocalDateTime ahora = LocalDateTime.now();
+
+        for (Pedido pedido : pedidos) {
+            if (pedido.getFechaLimiteEntrega() != null && pedido.getPrioridad() > 0.7) {
+                long horasHastaDeadline = ChronoUnit.HOURS.between(ahora, pedido.getFechaLimiteEntrega());
+                if (horasHastaDeadline < 48) { // Menos de 48 horas
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
+    // ✅ CORRECCIÓN DEL MÉTODO contarPedidosCriticosNoAsignados
+    private int contarPedidosCriticosNoAsignados() {
+        int count = 0;
+        LocalDateTime ahora = LocalDateTime.now();
+
+        for (Pedido pedido : poolNoAsignados) {
+            if (pedido.getFechaLimiteEntrega() != null && pedido.getPrioridad() > 0.7) {
+                long horasHastaDeadline = ChronoUnit.HOURS.between(ahora, pedido.getFechaLimiteEntrega());
+                if (horasHastaDeadline < 48) { // Menos de 48 horas (más realista)
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
+
+    private int contarRutasInvalidas(HashMap<Pedido, ArrayList<Vuelo>> solucionActual) {
+        int count = 0;
+        for (Map.Entry<Pedido, ArrayList<Vuelo>> entry : solucionActual.entrySet()) {
+            if (!esRutaValida(entry.getKey(), entry.getValue())) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    // ✅ DETECCIÓN MÁS ESTRICTA DE CONGESTIÓN TEMPORAL
+    private boolean detectarCongestionTemporalGrave() {
+        if (ocupacionTemporalAlmacenes == null) return false;
+
+        int periodosCongestionados = 0;
+        final int TOTAL_MINUTOS = HORIZON_DAYS * 24 * 60;
+        int totalPeriodos = (TOTAL_MINUTOS / 60) * aeropuertos.size();
+
+        for (Aeropuerto aeropuerto : aeropuertos) {
+            int[] ocupacion = ocupacionTemporalAlmacenes.get(aeropuerto);
+            if (ocupacion == null) continue;
+
+            for (int minuto = 0; minuto < TOTAL_MINUTOS; minuto += 60) { // Revisar cada hora
+                if (minuto < ocupacion.length &&
+                        ocupacion[minuto] > aeropuerto.getCapacidadMaxima() * 0.9) { // 90% de capacidad
+                    periodosCongestionados++;
+                }
+            }
+        }
+
+        // Congestión grave si más del 20% de los periodos están congestionados
+        double porcentajeCongestion = (double) periodosCongestionados / totalPeriodos * 100;
+        return porcentajeCongestion > 20.0;
+    }
+
+    private void ejecutarIteracionALNSColapso(HashMap<Pedido, ArrayList<Vuelo>> solucionActual,
+                                       int pesoActual, int iteracion) {
+        int[] operadoresSeleccionados = seleccionarOperadores();
+        int operadorDestruccion = operadoresSeleccionados[0];
+        int operadorReparacion = operadoresSeleccionados[1];
+
+        HashMap<Pedido, ArrayList<Vuelo>> solucionTemporal = new HashMap<>(solucionActual);
+
+        // Aplicar destrucción y reparación
+        Map<Vuelo, Integer> snapshotCapacidadesVuelos = crearSnapshotCapacidadesVuelos();
+        Map<Aeropuerto, Integer> snapshotCapacidadAeropuertos = crearSnapshotCapacidadAeropuerto();
+
+        ALNSDestruction.ResultadoDestruccion resultadoDestruccion =
+                aplicarOperadorDestruccion(solucionTemporal, operadorDestruccion);
+
+        if (resultadoDestruccion != null && !resultadoDestruccion.getPaquetesDestruidos().isEmpty()) {
+            solucionTemporal = new HashMap<>(resultadoDestruccion.getSolucionParcial());
+            reconstruirCapacidadesDesdeSolucion(solucionTemporal);
+            reconstruirAlmacenesDesdeSolucion(solucionTemporal);
+
+            ArrayList<Map.Entry<Pedido, ArrayList<Vuelo>>> paquetesExpandidos =
+                    expandirConPaquetesNoAsignados(resultadoDestruccion.getPaquetesDestruidos(), 100);
+
+            ALNSRepair.ResultadoReparacion resultadoReparacion =
+                    aplicarOperadorReparacion(solucionTemporal, operadorReparacion, paquetesExpandidos);
+
+            if (resultadoReparacion != null && resultadoReparacion.esExitoso()) {
+                solucionTemporal = new HashMap<>(resultadoReparacion.getSolucionReparada());
+                int pesoTemporal = calcularPesoSolucion(solucionTemporal);
+
+                // Criterio de aceptación simplificado para modo colapso
+                if (pesoTemporal > pesoActual ||
+                        aleatorio.nextDouble() < Math.exp((pesoTemporal - pesoActual) / temperatura)) {
+                    solucionActual.clear();
+                    solucionActual.putAll(solucionTemporal);
+                    pesoActual = pesoTemporal;
+
+                    if (mejorSolucion.isEmpty() || pesoTemporal > mejorSolucion.values().iterator().next()) {
+                        mejorSolucion.clear();
+                        mejorSolucion.put(new HashMap<>(solucionActual), pesoActual);
+                    }
+
+                    // Actualizar pool de no asignados
+                    actualizarPoolNoAsignados(solucionActual);
+                } else {
+                    restaurarVuelos(snapshotCapacidadesVuelos);
+                    restaurarAeropuertos(snapshotCapacidadAeropuertos);
+                }
+            } else {
+                restaurarVuelos(snapshotCapacidadesVuelos);
+                restaurarAeropuertos(snapshotCapacidadAeropuertos);
+            }
+        }
+
+        // Enfriamiento más lento para modo colapso
+        if (iteracion % 50 == 0) {
+            temperatura *= 0.99;
+        }
+    }
+
+    private void actualizarMetricasColapso(HashMap<Pedido, ArrayList<Vuelo>> solucionActual,
+                                           int iteracion) {
+        metricasColapso.put("iteracion", iteracion);
+        metricasColapso.put("pedidosAsignados", solucionActual.size());
+        metricasColapso.put("pedidosNoAsignados", poolNoAsignados.size());
+        metricasColapso.put("porcentajeAsignacion",
+                (double) solucionActual.size() / pedidos.size() * 100);
+        metricasColapso.put("almacenesLlenos", contarAlmacenesLlenos());
+        metricasColapso.put("vuelosSaturados", contarVuelosSaturados());
+        metricasColapso.put("temperatura", temperatura);
+    }
+
+    private void recolectarMetricasColapso() {
+        LocalDateTime horaFin = LocalDateTime.now();
+        long duracionSegundos = ChronoUnit.SECONDS.between(horaInicioColapso, horaFin);
+
+        metricasColapso.put("horaInicio", horaInicioColapso);
+        metricasColapso.put("horaFin", horaFin);
+        metricasColapso.put("duracionSegundos", duracionSegundos);
+        metricasColapso.put("iteracionesTotales", iteracionesColapso);
+        metricasColapso.put("pedidosTotales", pedidos.size());
+
+        // Estadísticas finales de la solución
+        if (!mejorSolucion.isEmpty()) {
+            HashMap<Pedido, ArrayList<Vuelo>> solucionFinal = mejorSolucion.keySet().iterator().next();
+            metricasColapso.put("pedidosAsignadosFinal", solucionFinal.size());
+            metricasColapso.put("pesoSolucionFinal", mejorSolucion.values().iterator().next());
+        }
+
+        // Análisis de bottlenecks
+        analizarBottlenecks();
+    }
+
+    private void analizarBottlenecks() {
+        // Identificar los cuellos de botella principales
+        List<String> bottlenecks = new ArrayList<>();
+
+        // Aeropuertos más congestionados
+        aeropuertos.stream()
+                .filter(a -> (double) a.getCapacidadActual() / a.getCapacidadMaxima() > 0.8)
+                .sorted((a1, a2) -> Double.compare(
+                        (double) a2.getCapacidadActual() / a2.getCapacidadMaxima(),
+                        (double) a1.getCapacidadActual() / a1.getCapacidadMaxima()
+                ))
+                .limit(5)
+                .forEach(a -> bottlenecks.add("AEROPUERTO_LLENO:" + a.getCodigoIATA() +
+                        ":" + String.format("%.1f%%",
+                        (double) a.getCapacidadActual() / a.getCapacidadMaxima() * 100)));
+
+        // Vuelos más saturados
+        vuelos.stream()
+                .filter(v -> v.getCapacidadUsada() > 0)
+                .sorted((v1, v2) -> Double.compare(
+                        (double) v2.getCapacidadUsada() / v2.getCapacidadMaxima(),
+                        (double) v1.getCapacidadUsada() / v1.getCapacidadMaxima()
+                ))
+                .limit(5)
+                .forEach(v -> bottlenecks.add("VUELO_SATURADO:" +
+                        v.getAeropuertoOrigen().getCodigoIATA() + "-" +
+                        v.getAeropuertoDestino().getCodigoIATA() + ":" +
+                        String.format("%.1f%%",
+                                (double) v.getCapacidadUsada() / v.getCapacidadMaxima() * 100)));
+
+        metricasColapso.put("bottlenecks", bottlenecks);
+    }
+
+    // Método para obtener las métricas del colapso
+    public Map<String, Object> getMetricasColapso() {
+        return new HashMap<>(metricasColapso);
+    }
+    //===============================FIN DE METODOS PARA COLAPSO===========================================
 
     // ==================== GETTERS PÚBLICOS PARA ACCEDER A LA SOLUCIÓN ====================
 

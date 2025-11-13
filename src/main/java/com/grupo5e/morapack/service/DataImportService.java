@@ -245,7 +245,6 @@ public class DataImportService {
     @Transactional
     public Map<String, Object> importFlights(MultipartFile file) {
         Map<String, Object> result = new HashMap<>();
-        Path tempFile = null;
         
         try {
             log.info("✈️ Iniciando importación de vuelos...");
@@ -262,13 +261,12 @@ public class DataImportService {
             
             log.info("   Aeropuertos disponibles en BD: {}", aeropuertos.size());
             
-            // 2. Guardar archivo temporal y usar LectorVuelos
-            tempFile = guardarArchivoTemporal(file);
-            LectorVuelos lector = new LectorVuelos(
-                tempFile.toString(),
-                new ArrayList<>(aeropuertos)
+            // 2. OPTIMIZADO: Leer vuelos directamente desde InputStream (sin archivo temporal)
+            // Esto mejora el rendimiento evitando I/O de disco innecesario
+            List<Vuelo> vuelos = LectorVuelos.leerVuelosDesdeStream(
+                file.getInputStream(),
+                aeropuertos
             );
-            ArrayList<Vuelo> vuelos = lector.leerVuelos();
             
             if (vuelos.isEmpty()) {
                 result.put("success", false);
@@ -292,13 +290,10 @@ public class DataImportService {
                 return result;
             }
             
-            // 5. Validar tiempos PACK (con advertencias, no bloquear)
-            int vuelosPACKCompliant = 0;
-            for (Vuelo vuelo : vuelos) {
-                if (PACKTimeValidator.validateFullPACKCompliance(vuelo)) {
-                    vuelosPACKCompliant++;
-                }
-            }
+            // 5. OPTIMIZADO: Validar tiempos PACK en paralelo (solo informativo, no bloquea)
+            long vuelosPACKCompliant = vuelos.parallelStream()
+                .filter(PACKTimeValidator::validateFullPACKCompliance)
+                .count();
             log.info("   📊 {} de {} vuelos cumplen estándares PACK ({}%)", 
                 vuelosPACKCompliant, vuelos.size(), 
                 vuelos.size() > 0 ? (vuelosPACKCompliant * 100 / vuelos.size()) : 0);
@@ -322,9 +317,8 @@ public class DataImportService {
             result.put("success", false);
             result.put("message", "Error: " + e.getMessage());
             result.put("error", e.getClass().getSimpleName());
-        } finally {
-            eliminarArchivoTemporal(tempFile);
         }
+        // Ya no necesitamos limpiar archivo temporal porque leemos directamente del stream
         
         return result;
     }
@@ -488,6 +482,127 @@ public class DataImportService {
         }
         
         return result;
+    }
+    
+    /**
+     * Importa múltiples archivos de pedidos en batch
+     * Procesa cada archivo secuencialmente y genera externalId único por archivo
+     * 
+     * @param files Array de archivos de pedidos
+     * @param horaInicio Opcional: solo cargar pedidos después de esta hora
+     * @param horaFin Opcional: solo cargar pedidos antes de esta hora
+     * @return Map con resultados del batch
+     */
+    @Transactional
+    public Map<String, Object> importOrdersBatch(MultipartFile[] files, LocalDateTime horaInicio, LocalDateTime horaFin) {
+        Map<String, Object> batchResult = new HashMap<>();
+        List<Map<String, Object>> fileResults = new ArrayList<>();
+        
+        int totalOrders = 0;
+        int filesProcessed = 0;
+        int filesWithErrors = 0;
+        List<String> errors = new ArrayList<>();
+        
+        try {
+            log.info("📦 Iniciando batch import de {} archivos de pedidos", files.length);
+            
+            // Verificar que existan aeropuertos
+            List<Aeropuerto> aeropuertos = aeropuertoService.listar();
+            if (aeropuertos.isEmpty()) {
+                batchResult.put("success", false);
+                batchResult.put("message", "Debe importar aeropuertos primero antes de importar pedidos");
+                batchResult.put("totalOrders", 0);
+                batchResult.put("filesProcessed", 0);
+                return batchResult;
+            }
+            
+            // Procesar cada archivo
+            for (int i = 0; i < files.length; i++) {
+                MultipartFile file = files[i];
+                String filename = file.getOriginalFilename();
+                
+                log.info("📄 Procesando archivo {}/{}: {}", (i + 1), files.length, filename);
+                
+                Map<String, Object> fileResult = new HashMap<>();
+                fileResult.put("filename", filename);
+                
+                try {
+                    // Importar archivo individual
+                    Map<String, Object> importResult = importOrders(file, horaInicio, horaFin);
+                    
+                    boolean success = (boolean) importResult.get("success");
+                    fileResult.put("success", success);
+                    
+                    if (success) {
+                        int count = (int) importResult.get("count");
+                        fileResult.put("orders", count);
+                        totalOrders += count;
+                        filesProcessed++;
+                        
+                        // Incluir información de filtrado si existe
+                        if (importResult.containsKey("pedidosCargados")) {
+                            fileResult.put("loaded", importResult.get("pedidosCargados"));
+                            fileResult.put("filtered", importResult.get("pedidosFiltrados"));
+                        }
+                        
+                        log.info("✅ Archivo {}: {} pedidos importados", filename, count);
+                    } else {
+                        filesWithErrors++;
+                        String errorMsg = (String) importResult.get("message");
+                        fileResult.put("error", errorMsg);
+                        errors.add(filename + ": " + errorMsg);
+                        log.error("❌ Error en archivo {}: {}", filename, errorMsg);
+                    }
+                    
+                } catch (Exception e) {
+                    filesWithErrors++;
+                    String errorMsg = e.getMessage();
+                    fileResult.put("success", false);
+                    fileResult.put("error", errorMsg);
+                    errors.add(filename + ": " + errorMsg);
+                    log.error("❌ Excepción procesando archivo {}: {}", filename, e.getMessage(), e);
+                }
+                
+                fileResults.add(fileResult);
+            }
+            
+            // Construir resultado final
+            boolean overallSuccess = filesWithErrors == 0;
+            
+            batchResult.put("success", overallSuccess);
+            batchResult.put("totalOrders", totalOrders);
+            batchResult.put("filesProcessed", filesProcessed);
+            batchResult.put("totalFiles", files.length);
+            batchResult.put("filesWithErrors", filesWithErrors);
+            batchResult.put("fileResults", fileResults);
+            
+            if (!errors.isEmpty()) {
+                batchResult.put("errors", errors);
+            }
+            
+            String message = String.format(
+                "Batch import completado: %d pedidos importados de %d/%d archivos",
+                totalOrders, filesProcessed, files.length
+            );
+            
+            if (filesWithErrors > 0) {
+                message += String.format(" (%d archivos con errores)", filesWithErrors);
+            }
+            
+            batchResult.put("message", message);
+            
+            log.info("🎉 Batch import finalizado: {} pedidos de {}/{} archivos", 
+                totalOrders, filesProcessed, files.length);
+            
+        } catch (Exception e) {
+            log.error("❌ Error crítico en batch import", e);
+            batchResult.put("success", false);
+            batchResult.put("message", "Error crítico: " + e.getMessage());
+            batchResult.put("totalOrders", totalOrders);
+            batchResult.put("filesProcessed", filesProcessed);
+        }
+        
+        return batchResult;
     }
     
     /**

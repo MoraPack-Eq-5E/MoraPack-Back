@@ -42,6 +42,9 @@ public class LectorPedidosV2 {
 
     // Caché de clientes para evitar búsquedas repetidas
     private final Map<String, Cliente> cacheClientes = new HashMap<>();
+    
+    // Lista de clientes nuevos pendientes de guardar en batch
+    private final List<Cliente> clientesNuevosPendientes = new ArrayList<>();
 
     public LectorPedidosV2(String directorioDatos,
                           ArrayList<Aeropuerto> aeropuertos,
@@ -206,6 +209,11 @@ public class LectorPedidosV2 {
 
                     pedidosPorCrear.add(pedido);
 
+                    // OPTIMIZACIÓN: Guardar clientes cada 1000 pedidos para evitar problemas de flush
+                    if (clientesNuevosPendientes.size() >= 1000) {
+                        guardarClientesPendientes();
+                    }
+
                     // Guardar en lotes de 100 para mejor rendimiento
                     if (pedidosPorCrear.size() >= 100) {
                         guardarLotePedidos(pedidosPorCrear, resultado);
@@ -218,6 +226,11 @@ public class LectorPedidosV2 {
                 }
             }
 
+            // CRÍTICO: Guardar clientes ANTES de los pedidos restantes
+            if (!clientesNuevosPendientes.isEmpty()) {
+                guardarClientesPendientes();
+            }
+            
             // Guardar pedidos restantes
             if (!pedidosPorCrear.isEmpty()) {
                 guardarLotePedidos(pedidosPorCrear, resultado);
@@ -268,6 +281,11 @@ public class LectorPedidosV2 {
 
         // Crear pedido
         Pedido pedido = new Pedido();
+        
+        // Generar externalId compuesto: {AIRPORT_ORIGIN}-{FILE_ORDER_ID}
+        String externalId = aeropuertoOrigen.getCodigoIATA() + "-" + idPedidoStr;
+        pedido.setExternalId(externalId);
+        
         pedido.setNombre("PEDIDO-" + idPedidoStr + "-" + codigoAeropuertoDestino);
         pedido.setCliente(cliente);
         pedido.setAeropuertoOrigenCodigo(aeropuertoOrigen.getCodigoIATA());
@@ -288,7 +306,31 @@ public class LectorPedidosV2 {
     }
 
     /**
+     * Guarda los clientes pendientes en batch y actualiza el cache
+     */
+    private void guardarClientesPendientes() {
+        if (clientesNuevosPendientes.isEmpty()) {
+            return;
+        }
+        
+        System.out.println("  💾 Guardando " + clientesNuevosPendientes.size() + " clientes nuevos en batch...");
+        try {
+            List<Cliente> clientesGuardados = clienteService.insertarBulk(clientesNuevosPendientes);
+            // Actualizar cache con clientes persistidos (con IDs de BD)
+            for (Cliente cliente : clientesGuardados) {
+                cacheClientes.put(String.valueOf(cliente.getId()), cliente);
+            }
+            System.out.println("  ✅ " + clientesGuardados.size() + " clientes guardados");
+        } catch (Exception e) {
+            System.err.println("  ❌ Error guardando clientes en batch: " + e.getMessage());
+            e.printStackTrace();
+        }
+        clientesNuevosPendientes.clear();
+    }
+    
+    /**
      * Obtiene o crea un cliente con caché para evitar búsquedas repetidas
+     * OPTIMIZADO: Acumula clientes nuevos para guardarlos en batch antes de los pedidos
      */
     private Cliente obtenerOCrearCliente(String idClienteStr, Ciudad ciudadRecojo) {
         // Verificar caché primero
@@ -308,7 +350,7 @@ public class LectorPedidosV2 {
             // Cliente no existe, continuar para crearlo
         }
 
-        // Crear nuevo cliente
+        // Crear nuevo cliente (sin persistir aún)
         Cliente nuevoCliente = new Cliente();
         nuevoCliente.setId(idCliente);
         nuevoCliente.setNombres("Cliente " + idCliente);
@@ -319,14 +361,13 @@ public class LectorPedidosV2 {
         nuevoCliente.setPassword("temporal");
         nuevoCliente.setActivo(true);
 
-        // Persistir
-        Long clienteId = clienteService.insertar(nuevoCliente);
-        Cliente clientePersistido = clienteService.buscarPorId(clienteId);
+        // OPTIMIZACIÓN: Agregar a lista de pendientes en lugar de insertar inmediatamente
+        clientesNuevosPendientes.add(nuevoCliente);
         
-        // Guardar en caché
-        cacheClientes.put(idClienteStr, clientePersistido);
+        // Guardar en caché (aunque aún no tenga ID de BD, está ok para referencias)
+        cacheClientes.put(idClienteStr, nuevoCliente);
         
-        return clientePersistido;
+        return nuevoCliente;
     }
 
     private ArrayList<Producto> crearProductos(int cantidad, Pedido pedido) {
@@ -358,14 +399,32 @@ public class LectorPedidosV2 {
     }
 
     private void guardarLotePedidos(List<Pedido> pedidos, ResultadoCargaPedidos resultado) {
-        for (Pedido pedido : pedidos) {
-            try {
-                pedidoService.insertar(pedido);
-                resultado.pedidosCreados++;
-            } catch (Exception e) {
-                System.err.println("Error guardando pedido: " + e.getMessage());
-                // No incrementar contador de error, ya se cargó correctamente del archivo
+        if (pedidos == null || pedidos.isEmpty()) {
+            return;
+        }
+        
+        try {
+            // OPTIMIZACIÓN: Usar batch insert en lugar de insertar uno por uno
+            // Esto reduce de N queries a ~N/1000 queries (según batch_size configurado)
+            List<Pedido> pedidosGuardados = pedidoService.insertarBulk(pedidos);
+            resultado.pedidosCreados += pedidosGuardados.size();
+            System.out.println("  ✅ Lote de " + pedidosGuardados.size() + " pedidos guardados en batch");
+        } catch (Exception e) {
+            System.err.println("  ❌ Error guardando lote de pedidos: " + e.getMessage());
+            e.printStackTrace();
+            // Intentar guardar uno por uno como fallback
+            System.out.println("  ⚠️ Intentando guardar pedidos individualmente como fallback...");
+            int guardadosIndividualmente = 0;
+            for (Pedido pedido : pedidos) {
+                try {
+                    pedidoService.insertar(pedido);
+                    guardadosIndividualmente++;
+                } catch (Exception ex) {
+                    System.err.println("    Error guardando pedido individual: " + ex.getMessage());
+                }
             }
+            resultado.pedidosCreados += guardadosIndividualmente;
+            System.out.println("  ✅ " + guardadosIndividualmente + " pedidos guardados individualmente");
         }
     }
 

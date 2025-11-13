@@ -244,6 +244,68 @@ public class DataImportController {
     }
 
     /**
+     * Importar múltiples archivos de pedidos en batch
+     * POST /api/data-import/orders/batch
+     * 
+     * Acepta múltiples archivos de pedidos (e.g., _pedidos_EBCI_.txt, _pedidos_EDDI_.txt)
+     * y los procesa en secuencia, generando externalId único por archivo
+     */
+    @Operation(
+        summary = "Importar pedidos en batch",
+        description = "Importa múltiples archivos de pedidos y los guarda en BD. " +
+                      "Cada archivo se procesa con su propio aeropuerto de origen para evitar colisiones de ID. " +
+                      "Opcionalmente filtra por ventana de tiempo."
+    )
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Pedidos importados exitosamente"),
+        @ApiResponse(responseCode = "400", description = "Error en el procesamiento de archivos")
+    })
+    @PostMapping(value = "/orders/batch", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<Map<String, Object>> uploadOrdersBatch(
+            @Parameter(description = "Múltiples archivos de pedidos (_pedidos_{AIRPORT}_.txt)")
+            @RequestParam("files") MultipartFile[] files,
+            @Parameter(description = "Hora de inicio para filtrar pedidos (ISO 8601, opcional)", example = "2025-01-02T00:00:00")
+            @RequestParam(required = false) String horaInicio,
+            @Parameter(description = "Hora de fin para filtrar pedidos (ISO 8601, opcional)", example = "2025-01-09T00:00:00")
+            @RequestParam(required = false) String horaFin) {
+        
+        log.info("📦 Batch import de {} archivos de pedidos", files.length);
+        
+        // Parsear fechas opcionales
+        LocalDateTime horaInicioDateTime = null;
+        LocalDateTime horaFinDateTime = null;
+        try {
+            if (horaInicio != null && !horaInicio.isEmpty()) {
+                horaInicioDateTime = LocalDateTime.parse(horaInicio);
+            }
+            if (horaFin != null && !horaFin.isEmpty()) {
+                horaFinDateTime = LocalDateTime.parse(horaFin);
+            }
+        } catch (Exception e) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", "Formato de fecha inválido. Use ISO 8601: yyyy-MM-ddTHH:mm:ss");
+            log.warn("Error parseando fechas: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        }
+        
+        // Procesar archivos en batch
+        Map<String, Object> result = dataImportService.importOrdersBatch(files, horaInicioDateTime, horaFinDateTime);
+        
+        boolean success = (boolean) result.get("success");
+        HttpStatus status = success ? HttpStatus.OK : HttpStatus.BAD_REQUEST;
+        
+        if (success) {
+            log.info("✅ Batch import completado: {} pedidos de {} archivos", 
+                result.get("totalOrders"), result.get("filesProcessed"));
+        } else {
+            log.error("Error en batch import: {}", result.get("message"));
+        }
+        
+        return ResponseEntity.status(status).body(result);
+    }
+
+    /**
      * Obtener estadísticas de la base de datos
      * GET /api/data-import/stats
      */
@@ -422,17 +484,18 @@ public class DataImportController {
     public ResponseEntity<Map<String, Object>> getImportStatus() {
         Map<String, Object> status = new HashMap<>();
         status.put("message", "Endpoints de importación operacionales");
-        status.put("endpoints", Map.of(
-            "airports", "/api/data-import/airports (POST)",
-            "flights", "/api/data-import/flights (POST)",
-            "orders", "/api/data-import/orders (POST)",
-            "stats", "/api/data-import/stats (GET)",
-            "clear-all", "/api/data-import/clear-all (DELETE)",
-            "clear-orders", "/api/data-import/clear-orders (DELETE)",
-            "clear-flights", "/api/data-import/clear-flights (DELETE)",
-            "clear-airports", "/api/data-import/clear-airports (DELETE)",
-            "clear-simulations", "/api/data-import/clear-simulations (DELETE)"
-        ));
+        Map<String, String> endpoints = new HashMap<>();
+        endpoints.put("airports", "/api/data-import/airports (POST)");
+        endpoints.put("flights", "/api/data-import/flights (POST)");
+        endpoints.put("orders", "/api/data-import/orders (POST)");
+        endpoints.put("orders-batch", "/api/data-import/orders/batch (POST)");
+        endpoints.put("stats", "/api/data-import/stats (GET)");
+        endpoints.put("clear-all", "/api/data-import/clear-all (DELETE)");
+        endpoints.put("clear-orders", "/api/data-import/clear-orders (DELETE)");
+        endpoints.put("clear-flights", "/api/data-import/clear-flights (DELETE)");
+        endpoints.put("clear-airports", "/api/data-import/clear-airports (DELETE)");
+        endpoints.put("clear-simulations", "/api/data-import/clear-simulations (DELETE)");
+        status.put("endpoints", endpoints);
         return ResponseEntity.ok(status);
     }
 }

@@ -15,6 +15,7 @@ import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Random;
 
@@ -51,6 +52,9 @@ public class LectorPedidos {
     }
 
     public void leerYGuardarProductos() {
+        List<Pedido> pedidosAcumulados = new ArrayList<>();
+        int BATCH_SIZE = 1000; // Guardar cada 1000 pedidos
+        
         try (BufferedReader reader = new BufferedReader(new FileReader(rutaArchivo))) {
             String linea;
 
@@ -61,8 +65,22 @@ public class LectorPedidos {
 
                 String[] partes = linea.trim().split("\\s+");
                 if (partes.length >= 6) {
-                    procesarLineaProducto(partes);
+                    Pedido pedido = procesarLineaProducto(partes);
+                    if (pedido != null) {
+                        pedidosAcumulados.add(pedido);
+                        
+                        // Guardar en lotes para evitar usar demasiada memoria
+                        if (pedidosAcumulados.size() >= BATCH_SIZE) {
+                            guardarLotePedidos(pedidosAcumulados);
+                            pedidosAcumulados.clear();
+                        }
+                    }
                 }
+            }
+
+            // Guardar pedidos restantes
+            if (!pedidosAcumulados.isEmpty()) {
+                guardarLotePedidos(pedidosAcumulados);
             }
 
             System.out.println("Proceso de carga de paquetes completado exitosamente.");
@@ -73,44 +91,67 @@ public class LectorPedidos {
         }
     }
 
-    private void procesarLineaProducto(String[] partes) {
-        int diasPrioridad = Integer.parseInt(partes[0]);
-        int hora = Integer.parseInt(partes[1]);
-        int minuto = Integer.parseInt(partes[2]);
-        String codigoAeropuertoDestino = partes[3].trim().toUpperCase();
-        int cantidadProductos = Integer.parseInt(partes[4]);
-        Long idCliente = (long) Integer.parseInt(partes[5]);
+    private Pedido procesarLineaProducto(String[] partes) {
+        try {
+            int diasPrioridad = Integer.parseInt(partes[0]);
+            int hora = Integer.parseInt(partes[1]);
+            int minuto = Integer.parseInt(partes[2]);
+            String codigoAeropuertoDestino = partes[3].trim().toUpperCase();
+            int cantidadProductos = Integer.parseInt(partes[4]);
+            Long idCliente = (long) Integer.parseInt(partes[5]);
 
-        Aeropuerto aeropuertoDestino = mapaAeropuertos.get(codigoAeropuertoDestino);
+            Aeropuerto aeropuertoDestino = mapaAeropuertos.get(codigoAeropuertoDestino);
 
-        if (aeropuertoDestino != null) {
-            // Obtener o crear cliente (debe estar persistido ANTES de asociarlo al pedido)
-            Cliente cliente = obtenerOCrearCliente(idCliente, aeropuertoDestino.getCiudad());
+            if (aeropuertoDestino != null) {
+                // Obtener o crear cliente (debe estar persistido ANTES de asociarlo al pedido)
+                Cliente cliente = obtenerOCrearCliente(idCliente, aeropuertoDestino.getCiudad());
 
-            // Calcular fechas
-            LocalDateTime fechaPedido = calcularFechaPedido(hora, minuto);
-            LocalDateTime plazoEntrega = calcularPlazoEntrega(diasPrioridad, fechaPedido);
+                // Calcular fechas
+                LocalDateTime fechaPedido = calcularFechaPedido(hora, minuto);
+                LocalDateTime plazoEntrega = calcularPlazoEntrega(diasPrioridad, fechaPedido);
 
-            // Crear pedido
-            Pedido pedido = crearPedido(cliente, aeropuertoDestino, fechaPedido, plazoEntrega);
+                // Crear pedido
+                Pedido pedido = crearPedido(cliente, aeropuertoDestino, fechaPedido, plazoEntrega);
 
-            // Crear productos
-            ArrayList<Producto> productos = crearProductos(cantidadProductos, pedido);
-            pedido.setProductos(productos);
-            
-            System.out.println("  📦 Pedido creado con " + productos.size() + " productos");
+                // Crear productos
+                ArrayList<Producto> productos = crearProductos(cantidadProductos, pedido);
+                pedido.setProductos(productos);
 
-            // Guardar paquete usando el servicio
-            try {
-                Integer idPaqueteGuardado = pedidoService.insertar(pedido);
-                System.out.println("  ✓ Paquete guardado con ID: " + idPaqueteGuardado + 
-                                   " (con " + productos.size() + " productos)");
-            } catch (Exception e) {
-                System.err.println("  ✗ Error al guardar paquete: " + e.getMessage());
-                e.printStackTrace();
+                return pedido;
+            } else {
+                System.err.println("Aeropuerto no encontrado: " + codigoAeropuertoDestino);
+                return null;
             }
-        } else {
-            System.err.println("Aeropuerto no encontrado: " + codigoAeropuertoDestino);
+        } catch (Exception e) {
+            System.err.println("Error procesando línea: " + e.getMessage());
+            return null;
+        }
+    }
+    
+    private void guardarLotePedidos(List<Pedido> pedidos) {
+        if (pedidos == null || pedidos.isEmpty()) {
+            return;
+        }
+        
+        try {
+            // OPTIMIZACIÓN: Usar batch insert en lugar de insertar uno por uno
+            List<Pedido> pedidosGuardados = pedidoService.insertarBulk(pedidos);
+            System.out.println("  ✅ Lote de " + pedidosGuardados.size() + " pedidos guardados en batch");
+        } catch (Exception e) {
+            System.err.println("  ❌ Error guardando lote: " + e.getMessage());
+            e.printStackTrace();
+            // Fallback: guardar uno por uno
+            System.out.println("  ⚠️ Intentando guardar individualmente como fallback...");
+            int guardados = 0;
+            for (Pedido pedido : pedidos) {
+                try {
+                    pedidoService.insertar(pedido);
+                    guardados++;
+                } catch (Exception ex) {
+                    System.err.println("    Error guardando pedido: " + ex.getMessage());
+                }
+            }
+            System.out.println("  ✅ " + guardados + " pedidos guardados individualmente");
         }
     }
 

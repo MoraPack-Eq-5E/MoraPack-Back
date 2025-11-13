@@ -24,6 +24,9 @@ public class Pedido {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
 
+    @Column(name = "external_id", unique = true, length = 50)
+    private String externalId;
+
     @Column(name = "nombre", nullable = true)
     private String nombre;
 

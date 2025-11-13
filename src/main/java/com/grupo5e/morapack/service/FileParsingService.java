@@ -405,20 +405,26 @@ public class FileParsingService {
                         cliente.setCorreo("cliente" + idCliente + "@morapack.com");
                         cliente.setCiudadRecojo(aeropuertoDestino.getCiudad());
 
-                        // Crear pedido
-                        Pedido pedido = new Pedido();
-                        pedido.setId(Integer.parseInt(idPedidoStr));
-                        pedido.setCliente(cliente);
-                        pedido.setAeropuertoDestinoCodigo(aeropuertoDestino.getCodigoIATA());
-                        pedido.setFechaPedido(fechaPedido);
-                        pedido.setFechaLimiteEntrega(plazoEntrega);
-                        pedido.setEstado(com.grupo5e.morapack.core.enums.EstadoPedido.PENDIENTE);
-
                         // Origen: almacén aleatorio en el mismo continente si es posible
                         Aeropuerto aeropuertoOrigen = obtenerAeropuertoAlmacenAleatorio(
                                 aeropuertoDestino.getCiudad().getContinente(),
                                 mapaAeropuertos
                         );
+
+                        // Crear pedido
+                        Pedido pedido = new Pedido();
+                        // No establecer ID manualmente, dejar que la BD lo auto-genere
+                        // pedido.setId(Integer.parseInt(idPedidoStr));
+                        
+                        // Generar externalId compuesto: {AIRPORT_ORIGIN}-{FILE_ORDER_ID}
+                        String externalId = aeropuertoOrigen.getCodigoIATA() + "-" + idPedidoStr;
+                        pedido.setExternalId(externalId);
+                        
+                        pedido.setCliente(cliente);
+                        pedido.setAeropuertoDestinoCodigo(aeropuertoDestino.getCodigoIATA());
+                        pedido.setFechaPedido(fechaPedido);
+                        pedido.setFechaLimiteEntrega(plazoEntrega);
+                        pedido.setEstado(com.grupo5e.morapack.core.enums.EstadoPedido.PENDIENTE);
                         pedido.setAeropuertoOrigenCodigo(aeropuertoOrigen.getCodigoIATA());
 
                         // Prioridad calculada

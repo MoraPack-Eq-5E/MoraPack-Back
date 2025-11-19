@@ -1,10 +1,12 @@
 package com.grupo5e.morapack.algorithm.input;
 
 import com.grupo5e.morapack.core.model.Aeropuerto;
+import com.grupo5e.morapack.core.model.Cancelacion;
 import com.grupo5e.morapack.core.model.Pedido;
 import com.grupo5e.morapack.core.model.Vuelo;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -46,7 +48,7 @@ public interface FuenteDatosInput {
      * @return Lista de pedidos con información completa (incluyendo productos)
      */
     List<Pedido> cargarPedidos(List<Aeropuerto> aeropuertos);
-    
+    List<Cancelacion> cargarCancelaciones(List<Vuelo> vuelos);
     /**
      * Carga pedidos filtrados por ventana de tiempo (para escenarios diarios/semanales)
      * 

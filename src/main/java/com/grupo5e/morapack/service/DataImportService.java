@@ -1,11 +1,10 @@
 package com.grupo5e.morapack.service;
 
-import com.grupo5e.morapack.core.model.Aeropuerto;
-import com.grupo5e.morapack.core.model.Almacen;
-import com.grupo5e.morapack.core.model.Ciudad;
-import com.grupo5e.morapack.core.model.Vuelo;
+import com.grupo5e.morapack.api.dto.FileValidationResult;
+import com.grupo5e.morapack.core.model.*;
 import com.grupo5e.morapack.core.validation.EntityValidator;
 import com.grupo5e.morapack.core.validation.PACKTimeValidator;
+import com.grupo5e.morapack.repository.CancelacionRepository;
 import com.grupo5e.morapack.repository.CiudadRepository;
 import com.grupo5e.morapack.repository.ClienteRepository;
 import com.grupo5e.morapack.repository.ProductoRepository;
@@ -17,10 +16,13 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -42,8 +44,10 @@ public class DataImportService {
     private final CiudadRepository ciudadRepository;
     private final ClienteRepository clienteRepository;
     private final ProductoRepository productoRepository;
+    private final CancelacionRepository cancelacionRepository;
     private final com.grupo5e.morapack.repository.AlmacenRepository almacenRepository;
-    
+    private final CancelacionService cancelacionService;
+
     /**
      * Guarda MultipartFile a archivo temporal
      */
@@ -322,7 +326,104 @@ public class DataImportService {
         
         return result;
     }
+    @Transactional
+    public Map<String, Object> importCancelaciones(MultipartFile file) {
+        Map<String, Object> result = new HashMap<>();
+        Path tempFile = null;
 
+        try {
+            log.info("✈️ Iniciando importación de vuelos...");
+
+            // 1. Verificar que existan aeropuertos en BD
+            List<Vuelo> vuelos = vueloService.listar();
+            if (vuelos.isEmpty()) {
+                result.put("success", false);
+                result.put("message", "Debe importar vuelos primero antes de importar cancelaciones");
+                result.put("count", 0);
+                log.warn("❌ No hay vuelos en BD. Importe vuelos primero.");
+                return result;
+            }
+
+            log.info("   Vuelos disponibles en BD: {}", vuelos.size());
+
+            // 2. Guardar archivo temporal y usar LectorVuelos
+            tempFile = guardarArchivoTemporal(file);
+            LectorCancelaciones lector = new LectorCancelaciones(
+                    tempFile.toString(),
+                    new ArrayList<>(vuelos)
+            );
+            ArrayList<Cancelacion> cancelaciones = (ArrayList<Cancelacion>) lector.leerCancelaciones();
+
+            if (cancelaciones.isEmpty()) {
+                result.put("success", false);
+                result.put("message", "No se encontraron cancelaciones en el archivo");
+                result.put("count", 0);
+                log.warn("❌ No se encontraron cancelaciones en el archivo");
+                return result;
+            }
+
+            log.info("   Cancelaciones parseados: {}", cancelaciones.size());
+            // 🧩 IMPRIMIR TODAS LAS CANCELACIONES PARSEADAS
+            log.info("────────────────────────────────────────────────────────────");
+            for (int i = 0; i < cancelaciones.size(); i++) {
+                Cancelacion c = cancelaciones.get(i);
+                log.info("   [{}] Día={} | {}-{} | {}:{} | VueloID={} | FechaCancelacion={}",
+                        i + 1,
+                        c.getDiasCancelado(),
+                        c.getCodigoIATAOrigen(),
+                        c.getCodigoIATADestino(),
+                        c.getHora(),
+                        c.getMinuto(),
+                        (c.getVuelo() != null ? c.getVuelo().getId() : "NULL"),
+                        (c.getFechaHoraCancelacion() != null ? c.getFechaHoraCancelacion() : "NULL")
+                );
+            }
+            log.info("────────────────────────────────────────────────────────────");
+            // 3. Validar cancelaciones antes de guardar
+            try {
+                EntityValidator.validateCancelaciones(cancelaciones);
+                log.info("   ✅ Validación de cancelaciones exitosa");
+            } catch (IllegalArgumentException e) {
+                log.error("   ❌ Error de validación en cancelaciones: {}", e.getMessage());
+                result.put("success", false);
+                result.put("message", "Error de validación: " + e.getMessage());
+                result.put("count", 0);
+                return result;
+            }
+
+            // 4. Borrar cancelaciones previas en BD antes de insertar las nuevas
+            log.info(" Eliminando cancelaciones previas en BD...");
+            cancelacionRepository.deleteAllInBatch(); // o deleteAll()
+            log.info("Tabla de cancelaciones limpia.");
+
+            // 5. Guardar cancelaciones en BD (IDs auto-generados)
+            List<Cancelacion> cancelacionesGuardados = cancelacionService.insertarBulk(cancelaciones);
+            cancelacionRepository.flush();
+
+            long total = cancelacionRepository.count();
+            log.info("📊 Total de cancelaciones en BD ahora: {}", total);
+            result.put("success", true);
+            result.put("message", "Cancelaciones importados exitosamente");
+            result.put("count", cancelacionesGuardados.size());
+
+            log.info("✅ {} Cancelaciones importados con IDs: {}",
+                    cancelacionesGuardados.size(),
+                    cancelacionesGuardados.stream()
+                            .limit(30)
+                            .map(v -> v.getId() + ":" + v.getCodigoIATAOrigen() + "-" + v.getCodigoIATADestino() + "-" + v.getVuelo().getAeropuertoOrigen().getCodigoIATA() + "-" + v.getVuelo().getAeropuertoDestino().getCodigoIATA())
+                            .collect(Collectors.joining(", ")));
+
+        } catch (Exception e) {
+            log.error("❌ Error importando cancelaciones", e);
+            result.put("success", false);
+            result.put("message", "Error: " + e.getMessage());
+            result.put("error", e.getClass().getSimpleName());
+        } finally {
+            eliminarArchivoTemporal(tempFile);
+        }
+
+        return result;
+    }
     /**
      * Importa pedidos desde archivo .txt y los guarda en BD inmediatamente
      * Requiere que existan aeropuertos en BD
@@ -638,13 +739,14 @@ public class DataImportService {
             long ciudades = ciudadRepository.count();
             long clientes = clienteRepository.count();
             long productos = productoRepository.count();
-            
+            long cancelaciones = cancelacionRepository.count();
             stats.put("aeropuertos", aeropuertos);
             stats.put("vuelos", vuelos);
             stats.put("pedidos", pedidos);
             stats.put("ciudades", ciudades);
             stats.put("clientes", clientes);
             stats.put("productos", productos);
+            stats.put("cancelaciones", cancelaciones);
             stats.put("timestamp", LocalDateTime.now());
             
         } catch (Exception e) {

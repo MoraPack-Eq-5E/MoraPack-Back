@@ -1,9 +1,11 @@
 package com.grupo5e.morapack.algorithm.input;
 
 import com.grupo5e.morapack.core.model.Aeropuerto;
+import com.grupo5e.morapack.core.model.Cancelacion;
 import com.grupo5e.morapack.core.model.Pedido;
 import com.grupo5e.morapack.core.model.Vuelo;
 import com.grupo5e.morapack.repository.AeropuertoRepository;
+import com.grupo5e.morapack.repository.CancelacionRepository;
 import com.grupo5e.morapack.repository.PedidoRepository;
 import com.grupo5e.morapack.repository.VueloRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -11,6 +13,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -30,7 +33,8 @@ public class FuenteDatosBaseDatos implements FuenteDatosInput {
     
     @Autowired
     private PedidoRepository pedidoRepository;
-    
+    @Autowired
+    private CancelacionRepository cancelacionRepository;
     @Override
     public void inicializar() {
         // Spring ya inicializó los repositories
@@ -100,7 +104,51 @@ public class FuenteDatosBaseDatos implements FuenteDatosInput {
             return List.of();
         }
     }
-    
+    @Override
+    @Transactional(readOnly = true)
+    public List<Cancelacion> cargarCancelaciones(List<Vuelo> vuelos) {
+        try {
+            List<Cancelacion> cancelaciones = cancelacionRepository.findAll();
+
+            // ✅ Forzar inicialización de relaciones LAZY
+            int conVuelo = 0;
+            for (Cancelacion c : cancelaciones) {
+                if (c.getVuelo() != null) {
+                    conVuelo++;
+                    // Forzar carga de vuelo y sus aeropuertos
+                    Vuelo v = c.getVuelo();
+                    v.getId(); // ID del vuelo
+                    if (v.getAeropuertoOrigen() != null) {
+                        v.getAeropuertoOrigen().getCodigoIATA();
+                    }
+                    if (v.getAeropuertoDestino() != null) {
+                        v.getAeropuertoDestino().getCodigoIATA();
+                    }
+                }
+            }
+
+            System.out.println("✓ Cargadas " + cancelaciones.size() + " cancelaciones desde BD");
+            System.out.println("✓ Cancelaciones con vuelo asociado: " + conVuelo);
+
+            // Log chiquito de ejemplo
+            cancelaciones.stream().limit(5).forEach(c -> {
+                String vueloInfo = (c.getVuelo() != null)
+                        ? "VueloID=" + c.getVuelo().getId()
+                        : "Vuelo=NULL";
+                System.out.println("   - Cancelación: dia=" + c.getDiasCancelado() +
+                        " " + c.getCodigoIATAOrigen() + "→" + c.getCodigoIATADestino() +
+                        " " + String.format("%02d:%02d", c.getHora(), c.getMinuto()) +
+                        " | " + vueloInfo);
+            });
+
+            return cancelaciones;
+        } catch (Exception e) {
+            System.err.println("✗ Error cargando cancelaciones desde BD: " + e.getMessage());
+            e.printStackTrace();
+            return List.of();
+        }
+    }
+
     @Override
     @Transactional(readOnly = true)
     public List<Pedido> cargarPedidos(List<Aeropuerto> aeropuertos) {

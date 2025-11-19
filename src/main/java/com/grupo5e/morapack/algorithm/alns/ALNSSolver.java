@@ -79,7 +79,7 @@ public class ALNSSolver {
 
     // Servicio de disponibilidad de vuelos (cancelaciones)
     private ServicioDisponibilidadVuelos servicioDisponibilidad;
-
+    private List<Cancelacion> cancelaciones;
     // Optimizaciones de rendimiento
     private IndiceVuelos indiceVuelos;
     private CacheDisponibilidad cacheDisponibilidad;
@@ -149,7 +149,25 @@ public class ALNSSolver {
         } else {
             this.pedidosOriginales = new ArrayList<>(fuenteDatos.cargarPedidos(this.aeropuertos));
         }
-        
+        // 2.5 Cargar cancelaciones (si existen en la fuente de datos / BD)
+        try {
+            // Si tu FuenteDatosInput ya tiene un método para esto, úsalo.
+            // La idea es que internamente lea de la BD (tabla cancelaciones).
+            this.cancelaciones = new ArrayList<>(fuenteDatos.cargarCancelaciones(this.vuelos));
+
+            if (this.cancelaciones.isEmpty()) {
+                System.out.println("Cancelaciones cargadas: 0 (no se aplicarán cancelaciones)");
+            } else {
+                System.out.println("Cancelaciones cargadas desde BD: " + this.cancelaciones.size());
+            }
+        } catch (UnsupportedOperationException ex) {
+            // Por si aún no implementas cargarCancelaciones en algunas fuentes
+            System.out.println("La fuente de datos no soporta cancelaciones. Se continuará sin cancelaciones.");
+            this.cancelaciones = Collections.emptyList();
+        } catch (Exception e) {
+            System.err.println("Error cargando cancelaciones desde la fuente de datos: " + e.getMessage());
+            this.cancelaciones = Collections.emptyList();
+        }
         System.out.println("Aeropuertos cargados: " + this.aeropuertos.size());
         System.out.println("Vuelos cargados: " + this.vuelos.size());
         System.out.println("Pedidos originales cargados: " + this.pedidosOriginales.size());
@@ -278,10 +296,23 @@ public class ALNSSolver {
         this.servicioDisponibilidad = new ServicioDisponibilidadVuelos();
 
         try {
-            LectorCancelaciones lectorCancelaciones = new LectorCancelaciones(
-                Constantes.RUTA_ARCHIVO_CANCELACIONES
-            );
-            servicioDisponibilidad.cargarCancelaciones(lectorCancelaciones);
+            // Si no hay cancelaciones cargadas, no hacemos nada especial
+            if (this.cancelaciones == null || this.cancelaciones.isEmpty()) {
+                System.out.println("\n=== CANCELACIONES DE VUELOS ===");
+                System.out.println("No se encontraron registros en la tabla de cancelaciones.");
+                System.out.println("El algoritmo continuará asumiendo que ningún vuelo está cancelado.");
+                System.out.println("================================\n");
+                return;
+            }
+
+            // Si hay cancelaciones → se las pasamos al servicio
+            // Necesitas un método en ServicioDisponibilidadVuelos, por ejemplo:
+            //   public void cargarCancelaciones(List<Cancelacion> cancelaciones)
+            servicioDisponibilidad.cargarCancelaciones(this.cancelaciones);
+//            LectorCancelaciones lectorCancelaciones = new LectorCancelaciones(
+//                Constantes.RUTA_ARCHIVO_CANCELACIONES
+//            );
+            //servicioDisponibilidad.cargarCancelaciones(lectorCancelaciones);
 
             int totalCancelaciones = servicioDisponibilidad.getTotalCancelaciones();
             int vuelosAfectados = servicioDisponibilidad.getVuelosAfectados();

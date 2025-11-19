@@ -1,9 +1,6 @@
 package com.grupo5e.morapack.core.validation;
 
-import com.grupo5e.morapack.core.model.Aeropuerto;
-import com.grupo5e.morapack.core.model.Pedido;
-import com.grupo5e.morapack.core.model.Vuelo;
-import com.grupo5e.morapack.core.model.Ciudad;
+import com.grupo5e.morapack.core.model.*;
 
 /**
  * EntityValidator - Validador de entidades del dominio
@@ -114,6 +111,63 @@ public class EntityValidator {
             );
         }
     }
+    public static void validateCancelacion(Cancelacion cancelacion) {
+        if (cancelacion == null) {
+            throw new IllegalArgumentException("cancelacion no puede ser null");
+        }
+
+        if (cancelacion.getVuelo() == null) {
+            throw new IllegalArgumentException("Vuelo es requerido para cancelacion " + cancelacion.getId());
+        }
+
+//        if (vuelo.getAeropuertoDestino() == null) {
+//            throw new IllegalArgumentException("Aeropuerto destino es requerido para vuelo " + vuelo.getId());
+//        }
+//
+//        // Validar que origen y destino sean diferentes
+//        if (vuelo.getAeropuertoOrigen().getId() != 0 &&
+//                vuelo.getAeropuertoDestino().getId() != 0 &&
+//                vuelo.getAeropuertoOrigen().getId() == vuelo.getAeropuertoDestino().getId()) {
+//            throw new IllegalArgumentException(
+//                    String.format("Aeropuerto origen y destino deben ser diferentes para vuelo %d", vuelo.getId())
+//            );
+//        }
+//
+//        if (vuelo.getCapacidadMaxima() <= 0) {
+//            throw new IllegalArgumentException(
+//                    String.format("Capacidad máxima debe ser positiva para vuelo %d: %d",
+//                            vuelo.getId(), vuelo.getCapacidadMaxima())
+//            );
+//        }
+//
+//        if (vuelo.getCapacidadUsada() < 0) {
+//            throw new IllegalArgumentException(
+//                    String.format("Capacidad usada no puede ser negativa para vuelo %d: %d",
+//                            vuelo.getId(), vuelo.getCapacidadUsada())
+//            );
+//        }
+//
+//        if (vuelo.getCapacidadUsada() > vuelo.getCapacidadMaxima()) {
+//            throw new IllegalArgumentException(
+//                    String.format("Capacidad usada (%d) no puede exceder capacidad máxima (%d) para vuelo %d",
+//                            vuelo.getCapacidadUsada(), vuelo.getCapacidadMaxima(), vuelo.getId())
+//            );
+//        }
+//
+//        if (vuelo.getTiempoTransporte() <= 0) {
+//            throw new IllegalArgumentException(
+//                    String.format("Tiempo de transporte debe ser positivo para vuelo %d: %.2f",
+//                            vuelo.getId(), vuelo.getTiempoTransporte())
+//            );
+//        }
+//
+//        if (vuelo.getFrecuenciaPorDia() <= 0) {
+//            throw new IllegalArgumentException(
+//                    String.format("Frecuencia por día debe ser positiva para vuelo %d: %.2f",
+//                            vuelo.getId(), vuelo.getFrecuenciaPorDia())
+//            );
+//        }
+    }
 
     // ========== PEDIDO VALIDATION ==========
     
@@ -222,6 +276,14 @@ public class EntityValidator {
         int count = 0;
         for (Vuelo vuelo : vuelos) {
             validateVuelo(vuelo);
+            count++;
+        }
+        return count;
+    }
+    public static int validateCancelaciones(Iterable<Cancelacion> cancelacions) {
+        int count = 0;
+        for (Cancelacion cancelacion : cancelacions) {
+            validateCancelacion(cancelacion);
             count++;
         }
         return count;

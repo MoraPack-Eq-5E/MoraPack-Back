@@ -213,8 +213,21 @@ public class LectorPedidosV2 {
 
                     pedidosPorCrear.add(pedido);
 
-                    // NO guardamos clientes ni pedidos durante el loop
-                    // Los acumulamos todos para guardar al final en orden correcto
+                    // OPTIMIZACIÓN: Guardar clientes cada 1000 pedidos para evitar problemas de flush
+                    if (clientesNuevosPendientes.size() >= 1000) {
+                        guardarClientesPendientes();
+                    }
+
+                    // Guardar en lotes de 100 para mejor rendimiento
+                    if (pedidosPorCrear.size() >= 100) {
+                        // CRÍTICO: Guardar clientes pendientes ANTES de guardar pedidos
+                        // para evitar errores
+                        if (!clientesNuevosPendientes.isEmpty()) {
+                            guardarClientesPendientes();
+                        }
+                        guardarLotePedidos(pedidosPorCrear, resultado);
+                        pedidosPorCrear.clear();
+                    }
 
                 } catch (Exception e) {
                     resultado.erroresParseo++;
@@ -227,7 +240,7 @@ public class LectorPedidosV2 {
             // PASO 1: Guardar TODOS los clientes primero
             if (!clientesNuevosPendientes.isEmpty()) {
                 System.out.println("  📊 Total clientes nuevos a guardar: " + clientesNuevosPendientes.size());
-                guardarClientesPendientesSinActualizarPedidos();
+                guardarClientesPendientes();
             }
             
             // PASO 2: Guardar TODOS los pedidos en lotes (ahora todos los clientes ya están persistidos)
@@ -307,43 +320,28 @@ public class LectorPedidosV2 {
      * Guarda todos los clientes pendientes en batch y actualiza el cache
      * CRÍTICO: Debe llamarse ANTES de guardar pedidos para evitar errrores
      */
-    private void guardarClientesPendientesSinActualizarPedidos() {
+    private void guardarClientesPendientes() {
         if (clientesNuevosPendientes.isEmpty()) {
             return;
         }
         
         System.out.println("  💾 Guardando " + clientesNuevosPendientes.size() + " clientes nuevos en batch...");
         try {
-            // Crear un mapa temporal para relacionar ID -> instancia antigua
-            Map<Long, Cliente> clientesAntiguos = new HashMap<>();
-            for (Cliente clienteNuevo : clientesNuevosPendientes) {
-                clientesAntiguos.put(clienteNuevo.getId(), clienteNuevo);
-            }
-            
-            // Guardar en batch
             List<Cliente> clientesGuardados = clienteService.insertarBulk(clientesNuevosPendientes);
             
-            // CRÍTICO: Actualizar TODAS las referencias en los pedidos acumulados
-            System.out.println("  🔄 Actualizando referencias de clientes en " + pedidosPorCrear.size() + " pedidos...");
+            // CRÍTICO: Actualizar caché con las instancias PERSISTIDAS retornadas por JPA
+            // Esto es importante porque las instancias persistidas son "managed" por JPA
+            // y tienen el estado correcto de la BD
             for (Cliente clientePersistido : clientesGuardados) {
-                String idStr = String.valueOf(clientePersistido.getId());
-                cacheClientes.put(idStr, clientePersistido);
-                
-                // Reemplazar referencias en TODOS los pedidos acumulados
-                Cliente clienteAntiguo = clientesAntiguos.get(clientePersistido.getId());
-                if (clienteAntiguo != null) {
-                    for (Pedido pedido : pedidosPorCrear) {
-                        if (pedido.getCliente() == clienteAntiguo) {
-                            pedido.setCliente(clientePersistido);
-                        }
-                    }
-                }
+                // Reemplazar en caché la instancia transient con la instancia persistida
+                cacheClientes.put(String.valueOf(clientePersistido.getId()), clientePersistido);
             }
             
-            System.out.println("  ✅ " + clientesGuardados.size() + " clientes guardados y referencias actualizadas");
+            System.out.println("  ✅ " + clientesGuardados.size() + " clientes guardados y caché actualizado");
         } catch (Exception e) {
             System.err.println("  ❌ Error guardando clientes en batch: " + e.getMessage());
             e.printStackTrace();
+            // En caso de error, también limpiar la lista para evitar reintentos con datos inconsistentes
         }
         clientesNuevosPendientes.clear();
     }
@@ -446,6 +444,20 @@ public class LectorPedidosV2 {
         }
         
         try {
+            // CRÍTICO: Asegurar que todos los pedidos tengan referencias a clientes PERSISTIDOS
+            // En caso de que algún pedido tenga referencia a una instancia transient del caché antiguo,
+            // actualizar con la instancia persistida del caché actualizado
+            for (Pedido pedido : pedidos) {
+                if (pedido.getCliente() != null && pedido.getCliente().getId() != null) {
+                    String clienteId = String.valueOf(pedido.getCliente().getId());
+                    // Obtener la instancia persistida del caché (si existe)
+                    Cliente clientePersistido = cacheClientes.get(clienteId);
+                    if (clientePersistido != null) {
+                        pedido.setCliente(clientePersistido);
+                    }
+                }
+            }
+            
             // OPTIMIZACIÓN: Usar batch insert en lugar de insertar uno por uno
             // Esto reduce de N queries a ~N/1000 queries (según batch_size configurado)
             List<Pedido> pedidosGuardados = pedidoService.insertarBulk(pedidos);

@@ -23,6 +23,7 @@ import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/aeropuertos")
+@CrossOrigin(origins = "*")
 @Tag(name = "Aeropuertos", description = "API para gestión de aeropuertos")
 public class AeropuertoController {
     

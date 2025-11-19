@@ -141,7 +141,31 @@ public class DataImportController {
         
         return ResponseEntity.status(status).body(result);
     }
+    @Operation(
+            summary = "Importar cancelaciones",
+            description = "Importa cancelaciones desde archivo .txt y los guarda en BD inmediatamente. Requiere vuelos previamente importados."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Cancelaciones importados exitosamente"),
+            @ApiResponse(responseCode = "400", description = "Archivo inválido, error en el procesamiento o vuelos no encontrados")
+    })
+    @PostMapping(value="/cancelaciones", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<Map<String,Object>> importCancelaciones(
+            @Parameter(description = "Archivo cancelaciones.txt")
+            @RequestParam("file") MultipartFile cancelacionesFile) {
 
+        if (cancelacionesFile == null) {
+            Map<String,Object> resp = Map.of(
+                    "success", false,
+                    "message", "Debe proporcionar el archivo de cancelaciones"
+            );
+            return ResponseEntity.badRequest().body(resp);
+        }
+
+        Map<String,Object> result = dataImportService.importCancelaciones(cancelacionesFile);
+        boolean success = Boolean.TRUE.equals(result.get("success"));
+        return ResponseEntity.status(success ? HttpStatus.OK : HttpStatus.BAD_REQUEST).body(result);
+    }
     /**
      * Importar pedidos desde archivo .txt
      * POST /api/data-import/orders

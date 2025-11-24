@@ -162,8 +162,8 @@ public class AlgoritmoController {
                 .idProducto(producto.getId())
                 .idPedido(producto.getPedido() != null ? producto.getPedido().getId() : null)
                 .nombrePedido(producto.getPedido() != null ? 
-                    producto.getPedido().getNombre() : "Pedido-" + producto.getPedido().getId())
-                .nombreProducto(producto.getNombre() != null ? 
+                    producto.getPedido().getNombre() : (producto.getPedido() != null ? "Pedido-" + producto.getPedido().getId() : "Pedido-UNKNOWN"))
+                .nombreProducto(producto.getNombre() != null ?
                     producto.getNombre() : "Producto-" + producto.getId())
                 .peso(producto.getPeso())
                 .volumen(producto.getVolumen())
@@ -238,9 +238,16 @@ public class AlgoritmoController {
 
     private LocalDateTime reconstruirFechaHora(Pedido pedido, Vuelo vuelo, boolean esSalida) {
 
+        // Validaciones: si falta información devolver null
+        if (pedido == null || pedido.getFechaPedido() == null || vuelo == null) {
+            return null;
+        }
+
         LocalDate fechaBase = pedido.getFechaPedido().toLocalDate(); // debes tener este campo
 
         LocalTime hora = esSalida ? vuelo.getHoraSalida() : vuelo.getHoraLlegada();
+
+        if (hora == null) return null;
 
         LocalDateTime fechaHora = LocalDateTime.of(fechaBase, hora);
 
@@ -389,16 +396,27 @@ public class AlgoritmoController {
             // ==============================
             // 2. Ejecutar ALNS COMPLETO
             // ==============================
-            ResultadoAlgoritmoDTO fullResult = ejecutarAlgoritmoInterno(solicitud);
+            ResultadoAlgoritmoDTO fullResult = ejecutarAlgoritmo(solicitud,1).getBody();
 
-            if (!fullResult.getExitoso()) {
+            if (fullResult == null || !Boolean.TRUE.equals(fullResult.getExitoso())) {
+                // Si fullResult es nulo o no exitoso, retornamos el objeto tal cual (o un DTO de error si es nulo)
+                if (fullResult == null) {
+                    ResultadoAlgoritmoDTO resultadoError = ResultadoAlgoritmoDTO.builder()
+                            .exitoso(false)
+                            .mensaje("Error interno: resultado del algoritmo es nulo")
+                            .horaInicio(windowStart)
+                            .horaFin(windowEnd)
+                            .build();
+                    return ResponseEntity.ok(resultadoError);
+                }
                 return ResponseEntity.ok(fullResult);
             }
 
             // ==============================
             // 3. Filtrar SOLO productos cuya horaSalida reconstruida cae dentro de la ventana
             // ==============================
-            List<RutaProductoDTO> rutasVentana = fullResult.getRutasProductos().stream()
+            List<RutaProductoDTO> rutasVentana = fullResult.getRutasProductos() == null ?
+                    new ArrayList<>() : fullResult.getRutasProductos().stream()
                     .filter(r -> {
                         LocalDateTime salida = r.getHoraSalida();
                         return salida != null &&
@@ -408,6 +426,30 @@ public class AlgoritmoController {
                     .toList();
 
             log.info("Productos en ventana: {}", rutasVentana.size());
+
+            // Si no hay productos en la ventana, devolver resultado vacío controlado
+            if (rutasVentana.isEmpty()) {
+                log.info("No hay productos en la ventana - devolviendo resultado vacío");
+
+                LineaDeTiempoSimulacionDTO emptyTimeline = generarLineaDeTiempoSimulacionVentana(
+                        new ArrayList<>(), windowStart, windowEnd);
+
+                ResultadoAlgoritmoDTO resultadoVacio = ResultadoAlgoritmoDTO.builder()
+                        .exitoso(true)
+                        .mensaje("No hay productos en la ventana: " + windowStart + " → " + windowEnd)
+                        .horaInicio(windowStart)
+                        .horaFin(windowEnd)
+                        .segundosEjecucion(0L)
+                        .totalProductos(0)
+                        .totalPedidos(0)
+                        .rutasProductos(new ArrayList<>())
+                        .costoTotal(0.0)
+                        .porcentajeAsignacion(0.0)
+                        .lineaDeTiempo(emptyTimeline)
+                        .build();
+
+                return ResponseEntity.ok(resultadoVacio);
+            }
 
             // ==============================
             // 4. Reconstruir mapa {Producto → Vuelos} para el conversor
@@ -463,9 +505,10 @@ public class AlgoritmoController {
             pedido.setId(r.getIdPedido());
             pedido.setAeropuertoOrigenCodigo(r.getCodigoOrigen());
             pedido.setAeropuertoDestinoCodigo(r.getCodigoDestino());
+            // Nota: reconstruirMapa no dispone de fechaPedido; mantener null para evitar suposiciones
             p.setPedido(pedido);
 
-            ArrayList<Vuelo> vuelos = r.getVuelos().stream()
+            ArrayList<Vuelo> vuelos = r.getVuelos() == null ? new ArrayList<>() : r.getVuelos().stream()
                     .map(this::convertirVueloDTOaVuelo)
                     .collect(Collectors.toCollection(ArrayList::new));
 
@@ -500,18 +543,38 @@ public class AlgoritmoController {
             Producto producto = entry.getKey();
             ArrayList<Vuelo> vuelos = entry.getValue();
 
+            // Validaciones defensivas
+            if (vuelos == null || vuelos.isEmpty()) {
+                // Crear ruta mínima sin horas si no hay vuelos
+                RutaProductoDTO rutaProductoMin = RutaProductoDTO.builder()
+                        .idProducto(producto.getId())
+                        .idPedido(producto.getPedido() != null ? producto.getPedido().getId() : null)
+                        .peso(producto.getPeso())
+                        .volumen(producto.getVolumen())
+                        .codigoOrigen(producto.getPedido() != null ? producto.getPedido().getAeropuertoOrigenCodigo() : null)
+                        .codigoDestino(producto.getPedido() != null ? producto.getPedido().getAeropuertoDestinoCodigo() : null)
+                        .vuelos(new ArrayList<>())
+                        .cantidadVuelos(0)
+                        .horaSalida(null)
+                        .horaLlegada(null)
+                        .tiempoTotalHoras(0.0)
+                        .estado(producto.getEstado() != null ? producto.getEstado().toString() : "DESCONOCIDO")
+                        .build();
+
+                rutasProductos.add(rutaProductoMin);
+                continue;
+            }
+
             // =====================================================
             // 1. RECONSTRUIR FECHA-HORA REAL DE SALIDA Y LLEGADA
             // =====================================================
-            LocalDateTime fechaSalidaReal =
-                    reconstruirFechaHora(producto.getPedido(), vuelos.get(0), true);
+            LocalDateTime fechaSalidaReal = null;
+            LocalDateTime fechaLlegadaReal = null;
 
-            LocalDateTime fechaLlegadaReal =
-                    reconstruirFechaHora(
-                            producto.getPedido(),
-                            vuelos.get(vuelos.size() - 1),
-                            false
-                    );
+            if (producto.getPedido() != null) {
+                fechaSalidaReal = reconstruirFechaHora(producto.getPedido(), vuelos.get(0), true);
+                fechaLlegadaReal = reconstruirFechaHora(producto.getPedido(), vuelos.get(vuelos.size() - 1), false);
+            }
 
             // =====================================================
             // 2. CONVERTIR VUELOS A DTO
@@ -528,8 +591,8 @@ public class AlgoritmoController {
                     .idPedido(producto.getPedido() != null ? producto.getPedido().getId() : null)
                     .peso(producto.getPeso())
                     .volumen(producto.getVolumen())
-                    .codigoOrigen(producto.getPedido().getAeropuertoOrigenCodigo())
-                    .codigoDestino(producto.getPedido().getAeropuertoDestinoCodigo())
+                    .codigoOrigen(producto.getPedido() != null ? producto.getPedido().getAeropuertoOrigenCodigo() : null)
+                    .codigoDestino(producto.getPedido() != null ? producto.getPedido().getAeropuertoDestinoCodigo() : null)
                     .vuelos(vuelosDTO)
                     .cantidadVuelos(vuelos.size())
                     .horaSalida(fechaSalidaReal)

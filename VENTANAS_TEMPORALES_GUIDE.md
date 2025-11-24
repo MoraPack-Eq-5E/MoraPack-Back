@@ -12,7 +12,7 @@ Las **ventanas temporales** son períodos de tiempo en los que el algoritmo plan
 ---
 
 ## 🎯 3 Funcionalidades Principales
-
+   
 ### 1️⃣ **Sistema de Ventanas con PREFILL**
 
 #### ¿Cómo funciona?

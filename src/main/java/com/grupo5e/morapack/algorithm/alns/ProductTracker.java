@@ -16,7 +16,8 @@ import java.util.Map;
  * 
  * Mantiene la relación entre productos individuales y sus vuelos asignados,
  * permitiendo tracking a nivel de producto como especifica el problema:
- * "Los productos pueden llegar en distintos momentos siempre que todos lleguen dentro del plazo establecido"
+ * "Los productos pueden llegar en distintos momentos siempre que todos lleguen
+ * dentro del plazo establecido"
  */
 public class ProductTracker {
 
@@ -29,10 +30,15 @@ public class ProductTracker {
     // Mapea ID de pedido a sus productos
     private Map<Integer, ArrayList<Producto>> pedidoAProductosMap;
 
+    // NUEVO: Mapea ID de producto a su ruta con tiempos absolutos calculados por
+    // ALNS
+    private Map<Integer, RutaConTiempos> productoARutaConTiemposMap;
+
     public ProductTracker() {
         this.productoARutaMap = new HashMap<>();
         this.productoAPedidoMap = new HashMap<>();
         this.pedidoAProductosMap = new HashMap<>();
+        this.productoARutaConTiemposMap = new HashMap<>();
     }
 
     /**
@@ -72,7 +78,7 @@ public class ProductTracker {
      * Implementa tracking a nivel de producto
      *
      * @param producto Producto a asignar
-     * @param ruta Ruta de vuelos para este producto
+     * @param ruta     Ruta de vuelos para este producto
      */
     public void assignProductToRoute(Producto producto, ArrayList<Vuelo> ruta) {
         if (producto == null || producto.getId() == null) {
@@ -81,6 +87,60 @@ public class ProductTracker {
 
         productoARutaMap.put(producto.getId(), ruta);
         producto.setEstado(EstadoProducto.EN_VUELO);
+    }
+
+    /**
+     * NUEVO: Asigna una ruta con tiempos absolutos a un producto.
+     * Esta es la versión mejorada que incluye fechas calculadas por el ALNS.
+     *
+     * @param producto       Producto a asignar
+     * @param rutaConTiempos Ruta con tiempos absolutos calculados
+     */
+    public void assignProductToRouteWithTimes(Producto producto, RutaConTiempos rutaConTiempos) {
+        if (producto == null || producto.getId() == null) {
+            return;
+        }
+
+        productoARutaConTiemposMap.put(producto.getId(), rutaConTiempos);
+
+        // También mantener compatibilidad con el mapa tradicional
+        if (rutaConTiempos != null && rutaConTiempos.getTramos() != null) {
+            ArrayList<Vuelo> vuelos = new ArrayList<>();
+            for (TramoConTiempo tramo : rutaConTiempos.getTramos()) {
+                if (tramo.getVuelo() != null) {
+                    vuelos.add(tramo.getVuelo());
+                }
+            }
+            productoARutaMap.put(producto.getId(), vuelos);
+        }
+
+        producto.setEstado(EstadoProducto.EN_VUELO);
+    }
+
+    /**
+     * NUEVO: Obtiene la ruta con tiempos de un producto.
+     *
+     * @param producto Producto a buscar
+     * @return RutaConTiempos o null si no existe
+     */
+    public RutaConTiempos getRouteWithTimesForProduct(Producto producto) {
+        if (producto == null || producto.getId() == null) {
+            return null;
+        }
+        return productoARutaConTiemposMap.get(producto.getId());
+    }
+
+    /**
+     * NUEVO: Verifica si un producto tiene ruta con tiempos asignada.
+     *
+     * @param producto Producto a verificar
+     * @return true si tiene ruta con tiempos
+     */
+    public boolean hasRouteWithTimes(Producto producto) {
+        if (producto == null || producto.getId() == null) {
+            return false;
+        }
+        return productoARutaConTiemposMap.containsKey(producto.getId());
     }
 
     /**
@@ -145,35 +205,35 @@ public class ProductTracker {
      */
     public ProductTrackingStats getStats() {
         ProductTrackingStats stats = new ProductTrackingStats();
-        
+
         // Contar productos totales y asignados
         stats.totalProducts = productoAPedidoMap.size();
         stats.assignedProducts = productoARutaMap.size();
         stats.unassignedProducts = stats.totalProducts - stats.assignedProducts;
-        
+
         // Contar pedidos totales y asignados
         stats.totalOrders = pedidoAProductosMap.size();
-        
+
         for (Integer pedidoId : pedidoAProductosMap.keySet()) {
             Pedido pedido = new Pedido();
             pedido.setId(pedidoId);
-            
+
             ArrayList<Producto> productos = getProductsForOrder(pedido);
             int productosAsignados = 0;
-            
+
             for (Producto producto : productos) {
                 if (isProductAssigned(producto)) {
                     productosAsignados++;
                 }
             }
-            
+
             if (productosAsignados == productos.size() && productos.size() > 0) {
                 stats.ordersFullyAssigned++;
             } else if (productosAsignados > 0) {
                 stats.ordersPartiallyAssigned++;
             }
         }
-        
+
         return stats;
     }
 
@@ -223,12 +283,40 @@ public class ProductTracker {
     }
 
     /**
+     * NUEVO: Genera un mapa de solución con tiempos a nivel de producto.
+     * Esta versión incluye fechas absolutas calculadas por el ALNS.
+     * 
+     * @return Map<Producto, RutaConTiempos> con la solución completa
+     */
+    public Map<Producto, RutaConTiempos> getSolucionConTiempos() {
+        Map<Producto, RutaConTiempos> solucion = new HashMap<>();
+
+        for (Map.Entry<Integer, RutaConTiempos> entry : productoARutaConTiemposMap.entrySet()) {
+            Integer productoId = entry.getKey();
+            RutaConTiempos rutaConTiempos = entry.getValue();
+
+            // Encontrar el objeto producto
+            for (ArrayList<Producto> productos : pedidoAProductosMap.values()) {
+                for (Producto producto : productos) {
+                    if (producto.getId() != null && producto.getId().equals(productoId)) {
+                        solucion.put(producto, rutaConTiempos);
+                        break;
+                    }
+                }
+            }
+        }
+
+        return solucion;
+    }
+
+    /**
      * Limpia todos los datos de tracking
      */
     public void clear() {
         productoARutaMap.clear();
         productoAPedidoMap.clear();
         pedidoAProductosMap.clear();
+        productoARutaConTiemposMap.clear();
     }
 
     /**
@@ -245,7 +333,7 @@ public class ProductTracker {
         System.out.println("Pedidos Parcialmente Asignados: " + stats.ordersPartiallyAssigned);
         if (stats.totalProducts > 0) {
             System.out.println("Tasa de Asignación: " +
-                String.format("%.2f%%", (stats.assignedProducts * 100.0 / stats.totalProducts)));
+                    String.format("%.2f%%", (stats.assignedProducts * 100.0 / stats.totalProducts)));
         }
         System.out.println("=========================================\n");
     }
@@ -262,4 +350,3 @@ public class ProductTracker {
         public int ordersPartiallyAssigned;
     }
 }
-

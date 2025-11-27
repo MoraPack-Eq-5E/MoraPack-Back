@@ -4,6 +4,7 @@ import com.grupo5e.morapack.algorithm.input.FuenteDatosInput;
 import com.grupo5e.morapack.algorithm.input.FabricaFuenteDatos;
 import com.grupo5e.morapack.core.model.*;
 import com.grupo5e.morapack.core.model.Pedido;
+import com.grupo5e.morapack.core.enums.Continente;
 import com.grupo5e.morapack.core.constants.Constantes;
 import com.grupo5e.morapack.core.service.ServicioDisponibilidadVuelos;
 import com.grupo5e.morapack.core.index.IndiceVuelos;
@@ -20,7 +21,8 @@ import java.util.Comparator;
 
 /**
  * ALNSSolver adaptado desde el Solution que proporcionaste.
- * Mantiene la lógica lo más fiel posible, cambiando únicamente nombres y constantes
+ * Mantiene la lógica lo más fiel posible, cambiando únicamente nombres y
+ * constantes
  * para integrarse en tu paquete/comunidad de modelos.
  */
 
@@ -38,12 +40,14 @@ public class ALNSSolver {
     // Unitización - DESACTIVADA para evitar problemas con IDs en BD
     private static final boolean HABILITAR_UNITIZACION_PRODUCTO = true;
     private ArrayList<Pedido> pedidosOriginales;
-    
+
     // ProductTracker - Mapeo directo Producto → Ruta (versión simplificada)
     private ProductTracker productTracker;
 
     // Ancla temporal T0
     private LocalDateTime T0;
+    // Hora de inicio de simulación proporcionada
+    private LocalDateTime horaInicioSimulacion;
     // Ocupación de almacenes
     private HashMap<Aeropuerto, Integer> ocupacionAlmacenes;
     private HashMap<Aeropuerto, int[]> ocupacionTemporalAlmacenes;
@@ -85,7 +89,7 @@ public class ALNSSolver {
     private IndiceVuelos indiceVuelos;
     private CacheDisponibilidad cacheDisponibilidad;
     private CacheRutas cacheRutas;
-    
+
     // CRÍTICO: RouteValidator para validación optimizada (Backend pattern)
     private RouteValidator routeValidator;
 
@@ -102,14 +106,15 @@ public class ALNSSolver {
     public ALNSSolver(int maxIteraciones) {
         this(maxIteraciones, null, null,1);
     }
-    
+
     /**
-     * Constructor con soporte para ventanas de tiempo (escenarios diarios/semanales).
+     * Constructor con soporte para ventanas de tiempo (escenarios
+     * diarios/semanales).
      * Si horaInicio y horaFin son null, carga todos los pedidos.
      * 
      * @param maxIteraciones Número máximo de iteraciones ALNS
-     * @param horaInicio Hora de inicio de la ventana de simulación (opcional)
-     * @param horaFin Hora de fin de la ventana de simulación (opcional)
+     * @param horaInicio     Hora de inicio de la ventana de simulación (opcional)
+     * @param horaFin        Hora de fin de la ventana de simulación (opcional)
      */
     public ALNSSolver(int maxIteraciones, LocalDateTime horaInicio, LocalDateTime horaFin,int tipoData) {
         System.out.println("========================================");
@@ -121,17 +126,20 @@ public class ALNSSolver {
             System.out.println("MODO: Todos los pedidos (sin filtrado de tiempo)");
         }
         System.out.println("========================================");
-        
+
+        // NUEVO: Guardar horaInicioSimulacion para sincronizar T0
+        this.horaInicioSimulacion = horaInicio;
+
         // 1. Usar factory para fuente de datos (ARCHIVO o BASEDATOS)
         FuenteDatosInput fuenteDatos = FabricaFuenteDatos.crearFuenteDatos();
         fuenteDatos.inicializar();
-        
+
         System.out.println("Fuente de datos: " + fuenteDatos.obtenerNombreFuente());
-        
+
         // 2. Cargar datos desde la fuente
         this.aeropuertos = new ArrayList<>(fuenteDatos.cargarAeropuertos());
         this.vuelos = new ArrayList<>(fuenteDatos.cargarVuelos(this.aeropuertos));
-        
+
         // CRÍTICO: Cargar pedidos con filtrado de tiempo si se especifica
         if (horaInicio != null && horaFin != null) {
             this.pedidosOriginales = new ArrayList<>(
@@ -162,33 +170,33 @@ public class ALNSSolver {
         System.out.println("Aeropuertos cargados: " + this.aeropuertos.size());
         System.out.println("Vuelos cargados: " + this.vuelos.size());
         System.out.println("Pedidos originales cargados: " + this.pedidosOriginales.size());
-        
+
         // 3. Unitización de productos (si está habilitado)
         if (HABILITAR_UNITIZACION_PRODUCTO) {
             this.pedidos = expandirPaquetesAUnidadesProducto(this.pedidosOriginales);
             System.out.println("UNITIZACIÓN APLICADA: " + this.pedidosOriginales.size() +
-                               " pedidos originales → " + this.pedidos.size() + " unidades de producto");
+                    " pedidos originales → " + this.pedidos.size() + " unidades de producto");
         } else {
             this.pedidos = new ArrayList<>(this.pedidosOriginales);
             System.out.println("UNITIZACIÓN DESHABILITADA: Usando pedidos originales");
         }
-        
+
         // 4. Inicializar ProductTracker para seguimiento a nivel de producto
         this.productTracker = new ProductTracker();
         this.productTracker.initializeFromOrders(this.pedidos);
         System.out.println("ProductTracker inicializado con " + this.pedidos.size() + " pedidos");
-        
+
         // 5. Estructuras base
         this.solucion = new HashMap<>();
         this.ocupacionAlmacenes = new HashMap<>();
         this.ocupacionTemporalAlmacenes = new HashMap<>();
-        
+
         // 6. Inicializar caches y estructuras
         //asignarAeropuertosOrigen();
         inicializarCacheCiudadAeropuerto();
         construirCacheAeropuertos(); // OPTIMIZACIÓN: Cache IATA→Aeropuerto
         inicializarT0();
-        
+        //ESTO ES LO QUE QUEDO ANTES DEL MAIN
         // 6.5. NUEVO: Cargar asignaciones existentes si estamos en modo ventana de tiempo (PREFILL)
         if (horaInicio != null && horaFin != null) {
             System.out.println("\n=== CARGANDO ESTADO EXISTENTE DE BD (PREFILL) ===");
@@ -227,35 +235,35 @@ public class ALNSSolver {
         this.aleatorio = new Random(System.currentTimeMillis());
         this.operadoresDestruccion = new ALNSDestruction(this.aeropuertos);
         this.operadoresReparacion = new ALNSRepair(this.aeropuertos, this.vuelos, this.ocupacionAlmacenes);
-        
+
         // 8. Parámetros ALNS
         this.maxIteraciones = maxIteraciones;
         this.temperatura = 100.0;
         this.tasaEnfriamiento = 0.95;
         this.tamanoSegmento = 100;
-        
+
         inicializarParametrosALNS();
         inicializarCapacidadAeropuertos();
         inicializarOcupacionTemporalAlmacenes();
-        
+
         // 9. Servicios auxiliares / optimizaciones
         inicializarServicioDisponibilidad();
         inicializarOptimizaciones();
-        
+
         // 10. OPTIMIZACIÓN: Pre-cargar cache de disponibilidad (warm-up)
         if (cacheDisponibilidad != null) {
             cacheDisponibilidad.precalcularDias(7, cacheCodigoIATAAeropuerto);
         }
-        
+
         // 11. Inicializar RouteValidator (CRÍTICO - patrón Backend)
         System.out.println("Inicializando RouteValidator (optimización O(1))...");
         this.routeValidator = new RouteValidator(this.aeropuertos, this.vuelos);
-        
+
         System.out.println("ALNS Solver inicializado correctamente");
         System.out.println("Iteraciones configuradas: " + this.maxIteraciones);
         System.out.println("========================================\n");
     }
-    
+
     /**
      * Constructor con parámetros por defecto (500 iteraciones).
      */
@@ -279,35 +287,52 @@ public class ALNSSolver {
             }
         }
 
-        this.temperatura = 100.0;
+        // OPTIMIZACIÓN C: Temperatura inicial calibrada según tamaño del problema
+        // Problemas grandes necesitan más temperatura para explorar el espacio de
+        // soluciones
+        int numPedidos = this.pedidos != null ? this.pedidos.size() : 100;
+        this.temperatura = Math.max(100.0, numPedidos * 1.5);
         this.tasaEnfriamiento = 0.98;
-        //OJO CON ESTE - Ya NO se sobrescribe, se usa el del constructor
-        // this.maxIteraciones = 500;  // ← COMENTADO para usar el parámetro del constructor
+        // OJO CON ESTE - Ya NO se sobrescribe, se usa el del constructor
+        // this.maxIteraciones = 500; // ← COMENTADO para usar el parámetro del
+        // constructor
         this.tamanoSegmento = 25;
-        
-        System.out.println("🔧 ALNS configurado con " + this.maxIteraciones + " iteraciones máximas");
+
+        System.out.println("ALNS configurado con " + this.maxIteraciones + " iteraciones máximas");
+        System.out.println("Temperatura inicial calibrada: " + String.format("%.1f", this.temperatura) +
+                " (basada en " + numPedidos + " pedidos)");
 
         this.contadorEstancamiento = 0;
-        this.umbralDiversificacion = 100;
+        // OPTIMIZACIÓN A: Umbral de diversificación dinámico según tamaño del problema
+        // Problemas pequeños: diversificar antes (mín 50)
+        // Problemas grandes: más paciencia (máx 200)
+        this.umbralDiversificacion = Math.max(50, Math.min(200, numPedidos / 5));
         this.modoDiversificacion = false;
         this.ultimaIteracionMejora = 0;
         this.factorDiversificacion = 1.0;
+
+        System.out.println("🔄 Umbral de diversificación: " + this.umbralDiversificacion + " iteraciones");
 
         // OPTIMIZED: Inicializar pool con PriorityQueue que ordena por urgencia
         this.poolNoAsignados = new PriorityQueue<>(new Comparator<Pedido>() {
             @Override
             public int compare(Pedido p1, Pedido p2) {
                 // Ordenar por deadline (más cercano primero = mayor urgencia)
-                if (p1.getFechaLimiteEntrega() == null && p2.getFechaLimiteEntrega() == null) return 0;
-                if (p1.getFechaLimiteEntrega() == null) return 1; // nulls last
-                if (p2.getFechaLimiteEntrega() == null) return -1;
+                if (p1.getFechaLimiteEntrega() == null && p2.getFechaLimiteEntrega() == null)
+                    return 0;
+                if (p1.getFechaLimiteEntrega() == null)
+                    return 1; // nulls last
+                if (p2.getFechaLimiteEntrega() == null)
+                    return -1;
 
                 int deadlineComp = p1.getFechaLimiteEntrega().compareTo(p2.getFechaLimiteEntrega());
-                if (deadlineComp != 0) return deadlineComp;
+                if (deadlineComp != 0)
+                    return deadlineComp;
 
                 // Tie-break por prioridad (mayor primero)
                 int priorityComp = Double.compare(p2.getPrioridad(), p1.getPrioridad());
-                if (priorityComp != 0) return priorityComp;
+                if (priorityComp != 0)
+                    return priorityComp;
 
                 // Tie-break final por ID
                 return Integer.compare(p1.getId(), p2.getId());
@@ -338,12 +363,12 @@ public class ALNSSolver {
 
             // Si hay cancelaciones → se las pasamos al servicio
             // Necesitas un método en ServicioDisponibilidadVuelos, por ejemplo:
-            //   public void cargarCancelaciones(List<Cancelacion> cancelaciones)
+            // public void cargarCancelaciones(List<Cancelacion> cancelaciones)
             servicioDisponibilidad.cargarCancelaciones(this.cancelaciones);
-//            LectorCancelaciones lectorCancelaciones = new LectorCancelaciones(
-//                Constantes.RUTA_ARCHIVO_CANCELACIONES
-//            );
-            //servicioDisponibilidad.cargarCancelaciones(lectorCancelaciones);
+            // LectorCancelaciones lectorCancelaciones = new LectorCancelaciones(
+            // Constantes.RUTA_ARCHIVO_CANCELACIONES
+            // );
+            // servicioDisponibilidad.cargarCancelaciones(lectorCancelaciones);
 
             int totalCancelaciones = servicioDisponibilidad.getTotalCancelaciones();
             int vuelosAfectados = servicioDisponibilidad.getVuelosAfectados();
@@ -374,7 +399,7 @@ public class ALNSSolver {
 
         // Construir cache de disponibilidad
         this.cacheDisponibilidad = new CacheDisponibilidad(servicioDisponibilidad, indiceVuelos);
-        
+
         // OPTIMIZACIÓN: Construir cache de rutas precalculadas
         this.cacheRutas = new CacheRutas();
 
@@ -419,15 +444,15 @@ public class ALNSSolver {
         System.out.println("Vuelos leídos: " + this.vuelos.size());
         System.out.println("Lectura de pedidos");
         System.out.println("Pedidos leídos: " + this.pedidos.size());
-        
+
         // Contar productos totales (cada pedido puede tener múltiples productos)
         // OPTIMIZADO: Usar getCantidadProductosRapido() para evitar cargar lista LAZY
         int totalProductos = this.pedidos.stream()
-            .mapToInt(Pedido::getCantidadProductosRapido)
-            .sum();
+                .mapToInt(Pedido::getCantidadProductosRapido)
+                .sum();
         System.out.println("Productos totales: " + totalProductos);
 
-        //SE GENERA UNA SOLUCION QUE SE MODIFICARA HASTA HALLAR LA CORRECTA O MEJOR
+        // SE GENERA UNA SOLUCION QUE SE MODIFICARA HASTA HALLAR LA CORRECTA O MEJOR
         System.out.println("\n=== GENERANDO SOLUCIÓN INICIAL ===");
         this.generarSolucionInicial();
 
@@ -451,15 +476,17 @@ public class ALNSSolver {
 
         System.out.println("\n=== RESULTADO FINAL ALNS ===");
         this.imprimirDescripcionSolucion(2);
-        
+
         // Imprimir resumen de tracking de productos
         productTracker.printTrackingSummary();
     }
 
-    //Actualiza el pool o inicializa el pool con los pedidos que todavia no tienen rutas por x o y motivos
+    // Actualiza el pool o inicializa el pool con los pedidos que todavia no tienen
+    // rutas por x o y motivos
     private void inicializarPoolNoAsignados() {
         poolNoAsignados.clear();
-        if (solucion.isEmpty()) return;
+        if (solucion.isEmpty())
+            return;
         HashMap<Pedido, ArrayList<Vuelo>> solucionActual = solucion.keySet().iterator().next();
         for (Pedido pedido : this.pedidos) {
             if (!solucionActual.containsKey(pedido)) {
@@ -467,20 +494,24 @@ public class ALNSSolver {
             }
         }
         if (Constantes.LOGGING_VERBOSO) {
-            System.out.println("Pool de no asignados inicializado: " + poolNoAsignados.size() + " pedidos disponibles para expansión ALNS");
+            System.out.println("Pool de no asignados inicializado: " + poolNoAsignados.size()
+                    + " pedidos disponibles para expansión ALNS");
         }
     }
-    //Se busca agregar paquetes que fueron destruidos al pool de no asignados mediante
+
+    // Se busca agregar paquetes que fueron destruidos al pool de no asignados
+    // mediante
     private ArrayList<Map.Entry<Pedido, ArrayList<Vuelo>>> expandirConPaquetesNoAsignados(
             ArrayList<Map.Entry<Pedido, ArrayList<Vuelo>>> paquetesDestruidos, int maxAgregar) {
 
         if (poolNoAsignados.isEmpty() || maxAgregar <= 0) {
             return paquetesDestruidos;
         }
-        //Duplica la lista de paquetes destruidos para añadir al pool de paquetes sin ruta
+        // Duplica la lista de paquetes destruidos para añadir al pool de paquetes sin
+        // ruta
         ArrayList<Map.Entry<Pedido, ArrayList<Vuelo>>> listaExpandida = new ArrayList<>(paquetesDestruidos);
 
-        //Calcula qué porcentaje del total de pedidos están actualmente no asignados.
+        // Calcula qué porcentaje del total de pedidos están actualmente no asignados.
         double ratioPool = (double) poolNoAsignados.size() / pedidos.size();
         double probabilidadExpansion;
 
@@ -493,20 +524,26 @@ public class ALNSSolver {
         } else {
             probabilidadExpansion = modoDiversificacion ? 0.3 : 0.1;
         }
-        //Si cae por debajo de probabilidadExpansion, entonces decide expandir (añadir pedidos del pool)
+        // Si cae por debajo de probabilidadExpansion, entonces decide expandir (añadir
+        // pedidos del pool)
         if (aleatorio.nextDouble() < probabilidadExpansion) {
             ArrayList<Pedido> noAsignadosOrdenados = new ArrayList<>(poolNoAsignados);
-            //ORDENA LOS PEDIDOS SEGUN LA FECHA LIMITE DE ENTREGA, PRIMERO LOS DE ENTREGA MAXIMA
+            // ORDENA LOS PEDIDOS SEGUN LA FECHA LIMITE DE ENTREGA, PRIMERO LOS DE ENTREGA
+            // MAXIMA
             noAsignadosOrdenados.sort((p1, p2) -> {
                 LocalDateTime d1 = p1.getFechaLimiteEntrega();
                 LocalDateTime d2 = p2.getFechaLimiteEntrega();
-                if (d1 == null && d2 == null) return 0;
-                if (d1 == null) return 1;
-                if (d2 == null) return -1;
+                if (d1 == null && d2 == null)
+                    return 0;
+                if (d1 == null)
+                    return 1;
+                if (d2 == null)
+                    return -1;
                 return d1.compareTo(d2);
             });
 
-            //Define cuantos pedidos como maximo se pueden agregar dependiendo del ratioPool
+            // Define cuantos pedidos como maximo se pueden agregar dependiendo del
+            // ratioPool
             int maxDinamico;
             if (ratioPool > 0.5) {
                 maxDinamico = Math.min(200, poolNoAsignados.size());
@@ -515,10 +552,11 @@ public class ALNSSolver {
             } else {
                 maxDinamico = Math.min(50, poolNoAsignados.size());
             }
-            //Luego ajusta con el tamaño real del pool (por si tiene menos).
+            // Luego ajusta con el tamaño real del pool (por si tiene menos).
             int agregar = Math.min(maxDinamico, noAsignadosOrdenados.size());
 
-            //Inserta los agregar primeros pedidos (los más urgentes) al final de la lista expandida.
+            // Inserta los agregar primeros pedidos (los más urgentes) al final de la lista
+            // expandida.
             for (int i = 0; i < agregar; i++) {
                 Pedido pedido = noAsignadosOrdenados.get(i);
                 listaExpandida.add(new java.util.AbstractMap.SimpleEntry<>(pedido, new ArrayList<>()));
@@ -526,9 +564,9 @@ public class ALNSSolver {
 
             if (Constantes.LOGGING_VERBOSO) {
                 System.out.println("Expansión ALNS: Agregando " + agregar + " pedidos no asignados para exploración" +
-                                 " (Pool: " + poolNoAsignados.size() + "/" + pedidos.size() +
-                                 " = " + String.format("%.1f%%", ratioPool * 100) +
-                                 ", Prob: " + String.format("%.0f%%", probabilidadExpansion * 100) + ")");
+                        " (Pool: " + poolNoAsignados.size() + "/" + pedidos.size() +
+                        " = " + String.format("%.1f%%", ratioPool * 100) +
+                        ", Prob: " + String.format("%.0f%%", probabilidadExpansion * 100) + ")");
             }
         }
 
@@ -551,8 +589,7 @@ public class ALNSSolver {
             return;
         }
 
-        Map.Entry<HashMap<Pedido, ArrayList<Vuelo>>, Integer> primeraEntrada =
-                solucion.entrySet().iterator().next();
+        Map.Entry<HashMap<Pedido, ArrayList<Vuelo>>, Integer> primeraEntrada = solucion.entrySet().iterator().next();
         HashMap<Pedido, ArrayList<Vuelo>> solucionActual = new HashMap<>(primeraEntrada.getKey());
         int pesoActual = primeraEntrada.getValue();
 
@@ -569,40 +606,45 @@ public class ALNSSolver {
             if (Constantes.LOGGING_VERBOSO || iteracion % Constantes.INTERVALO_LOG_ITERACION == 0) {
                 System.out.println("ALNS Iteración " + iteracion + "/" + maxIteraciones);
             }
-            //Seleccion de operadores para saber que operador de destruccion y repacion usar dependiendo de sus pesos
-            /*  | Índice | Operador de destrucción | Operador de reparación |
-                | ------ | ----------------------- | ---------------------- |
-                | 0      | Aleatoria               | Codiciosa              |
-                | 1      | Geográfica              | Arrepentimiento        |
-                | 2      | Por tiempo              | Por tiempo             |
-                | 3      | Congestionada           | Por capacidad          |
-            */
+            // Seleccion de operadores para saber que operador de destruccion y repacion
+            // usar dependiendo de sus pesos
+            /*
+             * | Índice | Operador de destrucción | Operador de reparación |
+             * | ------ | ----------------------- | ---------------------- |
+             * | 0 | Aleatoria | Codiciosa |
+             * | 1 | Geográfica | Arrepentimiento |
+             * | 2 | Por tiempo | Por tiempo |
+             * | 3 | Congestionada | Por capacidad |
+             */
             int[] operadoresSeleccionados = seleccionarOperadores();
             int operadorDestruccion = operadoresSeleccionados[0];
             int operadorReparacion = operadoresSeleccionados[1];
 
-//            int operadorDestruccion = 3;
-//            int operadorReparacion = 0;
+            // int operadorDestruccion = 3;
+            // int operadorReparacion = 0;
 
             if (Constantes.LOGGING_VERBOSO) {
-                System.out.println("  Operadores seleccionados: Destrucción=" + operadorDestruccion + ", Reparación=" + operadorReparacion);
+                System.out.println("  Operadores seleccionados: Destrucción=" + operadorDestruccion + ", Reparación="
+                        + operadorReparacion);
             }
 
             HashMap<Pedido, ArrayList<Vuelo>> solucionTemporal = new HashMap<>(solucionActual);
 
-            //Crear una foto de las capacidades en esa iteracion de los vuelos y de los aeropuertos
-            //esto sirve para revertir una destruccion o una reparacion de una solucion
-            Map<Vuelo, Integer> snapshotCapacidadesVuelos = crearSnapshotCapacidadesVuelos(); //VUELOS
-            Map<Aeropuerto, Integer> snapshotCapacidadAeropuertos = crearSnapshotCapacidadAeropuerto(); //AEROPUERTOS
+            // Crear una foto de las capacidades en esa iteracion de los vuelos y de los
+            // aeropuertos
+            // esto sirve para revertir una destruccion o una reparacion de una solucion
+            Map<Vuelo, Integer> snapshotCapacidadesVuelos = crearSnapshotCapacidadesVuelos(); // VUELOS
+            Map<Aeropuerto, Integer> snapshotCapacidadAeropuertos = crearSnapshotCapacidadAeropuerto(); // AEROPUERTOS
 
             if (Constantes.LOGGING_VERBOSO) {
                 System.out.println("  Aplicando operador de destrucción...");
             }
             long tiempoInicio = System.currentTimeMillis();
-            //empezamos con la destruccion de la solucion temporal (porque no queremos malograr la actual)
-            //se manda tambien el operador de destruccion segun seleccionarOperadores()
+            // empezamos con la destruccion de la solucion temporal (porque no queremos
+            // malograr la actual)
+            // se manda tambien el operador de destruccion segun seleccionarOperadores()
             ALNSDestruction.ResultadoDestruccion resultadoDestruccion = aplicarOperadorDestruccion(
-                solucionTemporal, operadorDestruccion);
+                    solucionTemporal, operadorDestruccion);
             long tiempoFin = System.currentTimeMillis();
 
             if (Constantes.LOGGING_VERBOSO) {
@@ -621,14 +663,14 @@ public class ALNSSolver {
             }
 
             solucionTemporal = new HashMap<>(resultadoDestruccion.getSolucionParcial());
-            reconstruirCapacidadesDesdeSolucion(solucionTemporal); //VUELOS
-            reconstruirAlmacenesDesdeSolucion(solucionTemporal); //AEROPUERTOS
+            reconstruirCapacidadesDesdeSolucion(solucionTemporal); // VUELOS
+            reconstruirAlmacenesDesdeSolucion(solucionTemporal); // AEROPUERTOS
 
-            ArrayList<Map.Entry<Pedido, ArrayList<Vuelo>>> paquetesExpandidos =
-                expandirConPaquetesNoAsignados(resultadoDestruccion.getPaquetesDestruidos(), 100);
+            ArrayList<Map.Entry<Pedido, ArrayList<Vuelo>>> paquetesExpandidos = expandirConPaquetesNoAsignados(
+                    resultadoDestruccion.getPaquetesDestruidos(), 100);
 
             ALNSRepair.ResultadoReparacion resultadoReparacion = aplicarOperadorReparacion(
-                solucionTemporal, operadorReparacion, paquetesExpandidos);
+                    solucionTemporal, operadorReparacion, paquetesExpandidos);
 
             if (resultadoReparacion == null || !resultadoReparacion.esExitoso()) {
                 restaurarVuelos(snapshotCapacidadesVuelos);
@@ -646,9 +688,9 @@ public class ALNSSolver {
 
             boolean aceptada = false;
             double ratioMejora = 0.0;
-            //VER EL PESO ACTUAL QUE DIO LA NUEVA SOLUCION
+            // VER EL PESO ACTUAL QUE DIO LA NUEVA SOLUCION
             if (pesoTemporal > pesoActual) {
-                ratioMejora = (double)(pesoTemporal - pesoActual) / Math.max(pesoActual, 1);
+                ratioMejora = (double) (pesoTemporal - pesoActual) / Math.max(pesoActual, 1);
                 solucionActual = solucionTemporal;
                 pesoActual = pesoTemporal;
                 aceptada = true;
@@ -673,8 +715,8 @@ public class ALNSSolver {
                     }
 
                     System.out.println("Iteración " + iteracion + ": ¡Nueva mejor solución! Peso: " + mejorPeso +
-                                     " (mejora: " + String.format("%.2f%%", ratioMejora * 100) + ")" +
-                                     " | No asignados: " + poolNoAsignados.size());
+                            " (mejora: " + String.format("%.2f%%", ratioMejora * 100) + ")" +
+                            " | No asignados: " + poolNoAsignados.size());
                 } else if (ratioMejora > 0.05) {
                     puntajesOperadores[operadorDestruccion][operadorReparacion] += 100;
                     conteoSinMejoras = Math.max(0, conteoSinMejoras - 5);
@@ -733,7 +775,7 @@ public class ALNSSolver {
 
             // Diversificación extrema / Restart
             if (iteracionesDesdeMejoraSignificativa >= Constantes.UMBRAL_ESTANCAMIENTO_PARA_RESTART &&
-                contadorRestarts < Constantes.MAX_RESTARTS) {
+                    contadorRestarts < Constantes.MAX_RESTARTS) {
 
                 solucionActual = aplicarDiversificacionExtrema(solucionActual, iteracion);
                 pesoActual = calcularPesoSolucion(solucionActual);
@@ -756,30 +798,60 @@ public class ALNSSolver {
 
                 if (iteracion % 100 == 0) {
                     System.out.println("Iteración " + iteracion +
-                                     " | Mejor peso: " + mejorPeso +
-                                     " | Temperatura: " + String.format("%.2f", temperatura) +
-                                     " | Modo: " + (modoDiversificacion ? "DIVERSIFICACIÓN" : "INTENSIFICACIÓN"));
+                            " | Mejor peso: " + mejorPeso +
+                            " | Temperatura: " + String.format("%.2f", temperatura) +
+                            " | Modo: " + (modoDiversificacion ? "DIVERSIFICACIÓN" : "INTENSIFICACIÓN"));
                 }
             }
 
-            if (contadorEstancamiento > 300) {
-                if (Constantes.LOGGING_VERBOSO) {
-                    System.out.println("Parada temprana en iteración " + iteracion +
-                                     " (sin mejoras por " + contadorEstancamiento + " iteraciones)");
-                }
+            // OPTIMIZACIÓN 1: Terminación inteligente por estancamiento
+            if (contadorEstancamiento > Constantes.UMBRAL_ESTANCAMIENTO_PARADA) {
+                System.out.println("⏹️ Parada temprana en iteración " + iteracion +
+                        " (sin mejoras por " + contadorEstancamiento + " iteraciones)");
                 break;
+            }
+
+            // OPTIMIZACIÓN 2: Terminación por solución óptima
+            // Si ya tenemos solución excelente, no gastar más iteraciones
+            if (iteracion > Constantes.ITERACIONES_MINIMAS_ANTES_PARADA && mejoras > 0) {
+                double tasaAsignacionActual = (double) solucionActual.size() / Math.max(pedidos.size(), 1);
+                if (tasaAsignacionActual >= Constantes.UMBRAL_SOLUCION_OPTIMA &&
+                        conteoSinMejoras > Constantes.ITERACIONES_SIN_MEJORA_SOLUCION_OPTIMA) {
+                    System.out.println("✅ Parada por solución óptima en iteración " + iteracion +
+                            " (" + String.format("%.0f%%", Constantes.UMBRAL_SOLUCION_OPTIMA * 100) +
+                            "+ asignación, " + conteoSinMejoras + " iteraciones sin mejora)");
+                    break;
+                }
+            }
+
+            // OPTIMIZACIÓN 3: Temperatura adaptativa
+            // Si hay muchas mejoras seguidas, enfriar más rápido
+            if (mejoras > 0 && iteracion > 0 && mejoras % 5 == 0) {
+                temperatura *= Constantes.FACTOR_ENFRIAMIENTO_RAPIDO;
+            }
+            // Si hay mucho estancamiento sin restart, recalentar suavemente
+            if (conteoSinMejoras > 0 && conteoSinMejoras % Constantes.INTERVALO_RECALENTAMIENTO == 0
+                    && !modoDiversificacion) {
+                temperatura *= Constantes.FACTOR_RECALENTAMIENTO;
             }
         }
 
         solucion.clear();
         solucion.putAll(mejorSolucion);
 
-        System.out.println("ALNS completado:");
-        System.out.println("  Mejoras encontradas: " + mejoras);
-        System.out.println("  Peso final: " + (mejorSolucion.isEmpty() ? 0 : mejorSolucion.values().iterator().next()));
-        if (Constantes.LOGGING_VERBOSO) {
-            System.out.println("  Temperatura final: " + temperatura);
-        }
+        // Resumen final mejorado
+        int pesoFinal = mejorSolucion.isEmpty() ? 0 : mejorSolucion.values().iterator().next();
+        int pedidosAsignados = mejorSolucion.isEmpty() ? 0 : mejorSolucion.keySet().iterator().next().size();
+        double tasaAsignacionFinal = pedidos.isEmpty() ? 0 : (double) pedidosAsignados / pedidos.size();
+
+        System.out.println("\n=== ALNS COMPLETADO ===");
+        System.out.println("Mejoras encontradas: " + mejoras);
+        System.out.println("Pedidos asignados: " + pedidosAsignados + "/" + pedidos.size() +
+                " (" + String.format("%.1f%%", tasaAsignacionFinal * 100) + ")");
+        System.out.println("Peso final: " + pesoFinal);
+        System.out.println("Restarts realizados: " + contadorRestarts + "/" + Constantes.MAX_RESTARTS);
+        System.out.println("Temperatura final: " + String.format("%.2f", temperatura));
+        System.out.println("========================\n");
     }
 
     private HashMap<Pedido, ArrayList<Vuelo>> aplicarDiversificacionExtrema(
@@ -787,14 +859,15 @@ public class ALNSSolver {
 
         System.out.println("\n🚀 ACTIVANDO DIVERSIFICACIÓN EXTREMA 🚀");
         System.out.println("Iteración " + iteracion + ": " + iteracionesDesdeMejoraSignificativa +
-                         " iteraciones sin mejora significativa");
+                " iteraciones sin mejora significativa");
         System.out.println("Restart #" + (contadorRestarts + 1) + "/" + Constantes.MAX_RESTARTS);
 
         HashMap<Pedido, ArrayList<Vuelo>> nuevaSolucion;
 
         switch (contadorRestarts % 3) {
             case 0:
-                System.out.println("Estrategia: DESTRUCCIÓN EXTREMA (" + (int)(Constantes.RATIO_DESTRUCCION_EXTREMA*100) + "%)");
+                System.out.println("Estrategia: DESTRUCCIÓN EXTREMA ("
+                        + (int) (Constantes.RATIO_DESTRUCCION_EXTREMA * 100) + "%)");
                 nuevaSolucion = destruccionExtrema(solucionActual);
                 break;
             case 1:
@@ -832,7 +905,7 @@ public class ALNSSolver {
         ArrayList<Pedido> asignados = new ArrayList<>(nuevaSolucion.keySet());
         Collections.shuffle(asignados, aleatorio);
 
-        int paquetesAEliminar = (int)(asignados.size() * Constantes.RATIO_DESTRUCCION_EXTREMA);
+        int paquetesAEliminar = (int) (asignados.size() * Constantes.RATIO_DESTRUCCION_EXTREMA);
 
         for (int i = 0; i < paquetesAEliminar && i < asignados.size(); i++) {
             nuevaSolucion.remove(asignados.get(i));
@@ -846,65 +919,72 @@ public class ALNSSolver {
         return nuevaSolucion;
     }
 
-//    private HashMap<Pedido, ArrayList<Vuelo>> restartGreedy() {
-//        for (Vuelo f : vuelos) {
-//            f.setCapacidadUsada(0);
-//        }
-//        for(Aeropuerto a : aeropuertos) {
-//            a.setCapacidadActual(0);
-//        }
-//        //inicializarCapacidadAeropuertos();
-//
-//        HashMap<Pedido, ArrayList<Vuelo>> nuevaSolucion = new HashMap<>();
-//
-//        ArrayList<Pedido> ordenados = new ArrayList<>(pedidos);
-//
-//        switch (contadorRestarts % 4) {
-//            case 0:
-//                ordenados.sort((p1, p2) -> Double.compare(p1.getPrioridad(), p2.getPrioridad()));
-//                System.out.println("Ordenamiento: Prioridad inversa");
-//                break;
-//            case 1:
-//                ordenados.sort((p1, p2) -> {
-//                    int a = p1.getProductos() != null ? p1.getProductos().size() : 1;
-//                    int b = p2.getProductos() != null ? p2.getProductos().size() : 1;
-//                    return Integer.compare(b, a);
-//                });
-//                System.out.println("Ordenamiento: Más productos primero");
-//                break;
-//            case 2:
-//                ordenados.sort((p1, p2) -> {
-//                    boolean p1Cont = obtenerAeropuerto(p1.getAeropuertoOrigenCodigo()).getCiudad().getContinente() ==
-//                            obtenerAeropuerto(p1.getAeropuertoDestinoCodigo()).getCiudad().getContinente();
-//                    boolean p2Cont = obtenerAeropuerto(p2.getAeropuertoOrigenCodigo()).getCiudad().getContinente() ==
-//                            obtenerAeropuerto(p2.getAeropuertoDestinoCodigo()).getCiudad().getContinente();
-//                    return Boolean.compare(p1Cont, p2Cont);
-//                });
-//                System.out.println("Ordenamiento: Intercontinentales primero");
-//                break;
-//            case 3:
-//                Collections.shuffle(ordenados, aleatorio);
-//                System.out.println("Ordenamiento: Aleatorio");
-//                break;
-//        }
-//
-//        int asignados = 0;
-//        for (Pedido p : ordenados) {
-//            ArrayList<Vuelo> mejorRuta = encontrarMejorRutaConVentanasTiempo(p, nuevaSolucion);
-//            if (mejorRuta != null) {
-//                int cnt = p.getProductos() != null ? p.getProductos().size() : 1;
-//                if (puedeAsignarConOptimizacionEspacio(p, mejorRuta, nuevaSolucion)) {
-//                    nuevaSolucion.put(p, mejorRuta);
-//                    actualizarCapacidadesVuelos(mejorRuta, cnt);
-//                    actualizarCapacidadAeropuertos(p.getAeropuertoDestinoCodigo(), cnt);
-//                    asignados++;
-//                }
-//            }
-//        }
-//
-//        System.out.println("Restart greedy: " + asignados + "/" + pedidos.size() + " pedidos asignados");
-//        return nuevaSolucion;
-//    }
+    // private HashMap<Pedido, ArrayList<Vuelo>> restartGreedy() {
+    // for (Vuelo f : vuelos) {
+    // f.setCapacidadUsada(0);
+    // }
+    // for(Aeropuerto a : aeropuertos) {
+    // a.setCapacidadActual(0);
+    // }
+    // //inicializarCapacidadAeropuertos();
+    //
+    // HashMap<Pedido, ArrayList<Vuelo>> nuevaSolucion = new HashMap<>();
+    //
+    // ArrayList<Pedido> ordenados = new ArrayList<>(pedidos);
+    //
+    // switch (contadorRestarts % 4) {
+    // case 0:
+    // ordenados.sort((p1, p2) -> Double.compare(p1.getPrioridad(),
+    // p2.getPrioridad()));
+    // System.out.println("Ordenamiento: Prioridad inversa");
+    // break;
+    // case 1:
+    // ordenados.sort((p1, p2) -> {
+    // int a = p1.getProductos() != null ? p1.getProductos().size() : 1;
+    // int b = p2.getProductos() != null ? p2.getProductos().size() : 1;
+    // return Integer.compare(b, a);
+    // });
+    // System.out.println("Ordenamiento: Más productos primero");
+    // break;
+    // case 2:
+    // ordenados.sort((p1, p2) -> {
+    // boolean p1Cont =
+    // obtenerAeropuerto(p1.getAeropuertoOrigenCodigo()).getCiudad().getContinente()
+    // ==
+    // obtenerAeropuerto(p1.getAeropuertoDestinoCodigo()).getCiudad().getContinente();
+    // boolean p2Cont =
+    // obtenerAeropuerto(p2.getAeropuertoOrigenCodigo()).getCiudad().getContinente()
+    // ==
+    // obtenerAeropuerto(p2.getAeropuertoDestinoCodigo()).getCiudad().getContinente();
+    // return Boolean.compare(p1Cont, p2Cont);
+    // });
+    // System.out.println("Ordenamiento: Intercontinentales primero");
+    // break;
+    // case 3:
+    // Collections.shuffle(ordenados, aleatorio);
+    // System.out.println("Ordenamiento: Aleatorio");
+    // break;
+    // }
+    //
+    // int asignados = 0;
+    // for (Pedido p : ordenados) {
+    // ArrayList<Vuelo> mejorRuta = encontrarMejorRutaConVentanasTiempo(p,
+    // nuevaSolucion);
+    // if (mejorRuta != null) {
+    // int cnt = p.getProductos() != null ? p.getProductos().size() : 1;
+    // if (puedeAsignarConOptimizacionEspacio(p, mejorRuta, nuevaSolucion)) {
+    // nuevaSolucion.put(p, mejorRuta);
+    // actualizarCapacidadesVuelos(mejorRuta, cnt);
+    // actualizarCapacidadAeropuertos(p.getAeropuertoDestinoCodigo(), cnt);
+    // asignados++;
+    // }
+    // }
+    // }
+    //
+    // System.out.println("Restart greedy: " + asignados + "/" + pedidos.size() + "
+    // pedidos asignados");
+    // return nuevaSolucion;
+    // }
     private HashMap<Pedido, ArrayList<Vuelo>> restartGreedy() {
         System.out.println("=== INICIANDO RESTART GREEDY ===");
 
@@ -912,7 +992,7 @@ public class ALNSSolver {
         for (Vuelo f : vuelos) {
             f.setCapacidadUsada(0);
         }
-        for(Aeropuerto a : aeropuertos) {
+        for (Aeropuerto a : aeropuertos) {
             a.setCapacidadActual(0);
         }
 
@@ -923,10 +1003,12 @@ public class ALNSSolver {
         ordenados.sort((p1, p2) -> {
             // 1. Prioridad más alta primero
             int prioridadCompare = Double.compare(p2.getPrioridad(), p1.getPrioridad());
-            if (prioridadCompare != 0) return prioridadCompare;
+            if (prioridadCompare != 0)
+                return prioridadCompare;
 
             // 2. Menos productos primero (más fáciles de colocar)
-            // OPTIMIZADO: Usar getCantidadProductosRapido() para evitar LazyInitializationException
+            // OPTIMIZADO: Usar getCantidadProductosRapido() para evitar
+            // LazyInitializationException
             int productos1 = p1.getCantidadProductosRapido();
             int productos2 = p2.getCantidadProductosRapido();
             return Integer.compare(productos1, productos2);
@@ -986,6 +1068,7 @@ public class ALNSSolver {
         System.out.println("=== FIN RESTART GREEDY ===");
         return nuevaSolucion;
     }
+
     private ArrayList<Vuelo> encontrarMejorRutaRobusta(Pedido pedido) {
         try {
             // Intentar método original primero
@@ -1041,8 +1124,10 @@ public class ALNSSolver {
             return null;
         }
     }
+
     private boolean puedeAsignarConCapacidadPermisiva(Pedido pedido, ArrayList<Vuelo> ruta) {
-        if (ruta == null || ruta.isEmpty()) return false;
+        if (ruta == null || ruta.isEmpty())
+            return false;
 
         // OPTIMIZADO: Usar getCantidadProductosRapido()
         int cantidadProductos = pedido.getCantidadProductosRapido();
@@ -1056,7 +1141,8 @@ public class ALNSSolver {
 
         // Verificar capacidad del aeropuerto destino (más permisivo)
         Aeropuerto aeropuertoDestino = obtenerAeropuerto(pedido.getAeropuertoDestinoCodigo());
-        if (aeropuertoDestino == null) return false;
+        if (aeropuertoDestino == null)
+            return false;
 
         // Permitir hasta el 95% de capacidad para restart
         int capacidadDisponible = aeropuertoDestino.getCapacidadMaxima() - aeropuertoDestino.getCapacidadActual();
@@ -1072,11 +1158,14 @@ public class ALNSSolver {
                 int s1 = calcularCalidadRuta(e1.getKey(), e1.getValue());
                 int s2 = calcularCalidadRuta(e2.getKey(), e2.getValue());
                 int cmp = Integer.compare(s2, s1);
-                if (cmp != 0) return cmp;
+                if (cmp != 0)
+                    return cmp;
                 int cmpVuelos = Integer.compare(e1.getValue().size(), e2.getValue().size());
-                if (cmpVuelos != 0) return cmpVuelos;
+                if (cmpVuelos != 0)
+                    return cmpVuelos;
                 int cmpPrior = Double.compare(e2.getKey().getPrioridad(), e1.getKey().getPrioridad());
-                if (cmpPrior != 0) return cmpPrior;
+                if (cmpPrior != 0)
+                    return cmpPrior;
                 return Integer.compare(e1.getKey().hashCode(), e2.getKey().hashCode());
             } catch (Exception ex) {
                 System.out.println("Warning: Error en comparación de calidad, usando fallback");
@@ -1084,42 +1173,51 @@ public class ALNSSolver {
             }
         });
 
-        int mantener = (int)(entradas.size() * 0.3);
+        int mantener = (int) (entradas.size() * 0.3);
         for (int i = 0; i < mantener && i < entradas.size(); i++) {
             nuevaSolucion.put(entradas.get(i).getKey(), entradas.get(i).getValue());
         }
 
-        System.out.println("Híbrido: Manteniendo " + mantener + " mejores pedidos, regenerando " + (solucionActual.size() - mantener));
+        System.out.println("Híbrido: Manteniendo " + mantener + " mejores pedidos, regenerando "
+                + (solucionActual.size() - mantener));
 
-        reconstruirCapacidadesDesdeSolucion(nuevaSolucion); //VUELOS
-        reconstruirAlmacenesDesdeSolucion(nuevaSolucion); //AEROPUERTOS
+        reconstruirCapacidadesDesdeSolucion(nuevaSolucion); // VUELOS
+        reconstruirAlmacenesDesdeSolucion(nuevaSolucion); // AEROPUERTOS
 
         return nuevaSolucion;
     }
 
     private int calcularCalidadRuta(Pedido p, ArrayList<Vuelo> ruta) {
-        if (ruta == null || ruta.isEmpty()) return 0;
+        if (ruta == null || ruta.isEmpty())
+            return 0;
 
         int score = 0;
-        if (ruta.size() == 1) score += 1000;
-        else if (ruta.size() == 2) score += 500;
-        else score += 100;
+        if (ruta.size() == 1)
+            score += 1000;
+        else if (ruta.size() == 2)
+            score += 500;
+        else
+            score += 100;
 
         double total = 0;
-        for (Vuelo v : ruta) total += v.getTiempoTransporte();
-        if (ruta.size() > 1) total += (ruta.size() - 1) * 2.0;
+        for (Vuelo v : ruta)
+            total += v.getTiempoTransporte();
+        if (ruta.size() > 1)
+            total += (ruta.size() - 1) * 2.0;
 
-        score += Math.max(0, 2000 - (int)(total * 10));
+        score += Math.max(0, 2000 - (int) (total * 10));
 
         // OPTIMIZADO: Usar getCantidadProductosRapido()
         int products = p.getCantidadProductosRapido();
         score += products * 10;
-        score += (int)(p.getPrioridad() * 50);
+        score += (int) (p.getPrioridad() * 50);
 
-        boolean mismoContinente = obtenerAeropuerto(p.getAeropuertoOrigenCodigo()).getCiudad().getContinente() ==
-                obtenerAeropuerto(p.getAeropuertoDestinoCodigo()).getCiudad().getContinente();
-        if (mismoContinente) score += 200;
-        else score += 100;
+        boolean mismoContinente = obtenerAeropuerto(p.getAeropuertoOrigenCodigo()).getCiudad()
+                .getContinente() == obtenerAeropuerto(p.getAeropuertoDestinoCodigo()).getCiudad().getContinente();
+        if (mismoContinente)
+            score += 200;
+        else
+            score += 100;
 
         return Math.max(1, score);
     }
@@ -1130,7 +1228,7 @@ public class ALNSSolver {
                 System.out.println("    Seleccionando operadores...");
             }
 
-            //Calcular el peso total de todos los operadores
+            // Calcular el peso total de todos los operadores
             double pesoTotal = 0.0;
             for (int i = 0; i < pesosOperadores.length; i++) {
                 for (int j = 0; j < pesosOperadores[i].length; j++) {
@@ -1141,17 +1239,19 @@ public class ALNSSolver {
             if (Constantes.LOGGING_VERBOSO) {
                 System.out.println("    Peso total: " + pesoTotal);
             }
-            /*  | D\R | R1  | R2  | R3  | R4  |
-                | D1  | 1.0 | 2.0 | 1.5 | 1.0 |
-                | D2  | 0.5 | 3.0 | 2.5 | 1.0 |
-                | D3  | 1.0 | 1.0 | 1.0 | 1.0 |
-                | D4  | 0.8 | 0.9 | 1.1 | 1.2 |
-            */
-            //Genera un numero aleatorio proporcional
+            /*
+             * | D\R | R1 | R2 | R3 | R4 |
+             * | D1 | 1.0 | 2.0 | 1.5 | 1.0 |
+             * | D2 | 0.5 | 3.0 | 2.5 | 1.0 |
+             * | D3 | 1.0 | 1.0 | 1.0 | 1.0 |
+             * | D4 | 0.8 | 0.9 | 1.1 | 1.2 |
+             */
+            // Genera un numero aleatorio proporcional
             double valorAleatorio = aleatorio.nextDouble() * pesoTotal;
             double pesoAcumulado = 0.0;
-            //selecciona usando ruleta ponderada
-            //Va sumando los pesos fila por fila, columna por columna, hasta que el peso acumulado supera el número aleatorio.
+            // selecciona usando ruleta ponderada
+            // Va sumando los pesos fila por fila, columna por columna, hasta que el peso
+            // acumulado supera el número aleatorio.
             for (int i = 0; i < pesosOperadores.length; i++) {
                 for (int j = 0; j < pesosOperadores[i].length; j++) {
                     pesoAcumulado += pesosOperadores[i][j];
@@ -1159,7 +1259,7 @@ public class ALNSSolver {
                         if (Constantes.LOGGING_VERBOSO) {
                             System.out.println("    Operadores seleccionados: " + i + ", " + j);
                         }
-                        return new int[]{i, j};
+                        return new int[] { i, j };
                     }
                 }
             }
@@ -1167,57 +1267,70 @@ public class ALNSSolver {
             if (Constantes.LOGGING_VERBOSO) {
                 System.out.println("    Usando fallback: 0, 0");
             }
-            return new int[]{0, 0};
+            return new int[] { 0, 0 };
         } catch (Exception e) {
             System.out.println("    Error en selección de operadores: " + e.getMessage());
             e.printStackTrace();
-            return new int[]{0, 0};
+            return new int[] { 0, 0 };
         }
     }
 
     private ALNSDestruction.ResultadoDestruccion aplicarOperadorDestruccion(
             HashMap<Pedido, ArrayList<Vuelo>> solucion, int indiceOperador) {
         try {
-            //porcentaje de pedidos a eliminar
+            // porcentaje de pedidos a eliminar
             double ratioAjustado = Constantes.RATIO_DESTRUCCION * factorDiversificacion;
-            //minimo absoluto de paquetes a eliminar
-            int minAjustado = (int)(Constantes.DESTRUCCION_MIN_PAQUETES * factorDiversificacion);
-            //maximo absoluto de paquetes a eliminar
-            int maxAjustado = (int)(Constantes.DESTRUCCION_MAX_PAQUETES * factorDiversificacion);
-            /*El multiplicador factorDiversificacion aumenta o reduce la agresividad:
-            Si el algoritmo está estancado, factorDiversificacion > 1 → destruye más.
-            Si va mejorando, factorDiversificacion < 1 → destruye menos.*/
+            // minimo absoluto de paquetes a eliminar
+            int minAjustado = (int) (Constantes.DESTRUCCION_MIN_PAQUETES * factorDiversificacion);
+            // maximo absoluto de paquetes a eliminar
+            int maxAjustado = (int) (Constantes.DESTRUCCION_MAX_PAQUETES * factorDiversificacion);
+            /*
+             * El multiplicador factorDiversificacion aumenta o reduce la agresividad:
+             * Si el algoritmo está estancado, factorDiversificacion > 1 → destruye más.
+             * Si va mejorando, factorDiversificacion < 1 → destruye menos.
+             */
             switch (indiceOperador) {
                 case 0:
                     if (Constantes.LOGGING_VERBOSO) {
-                        System.out.println("    Ejecutando destruccionAleatoria... (ratio: " + String.format("%.2f", ratioAjustado) + ")");
+                        System.out.println("    Ejecutando destruccionAleatoria... (ratio: "
+                                + String.format("%.2f", ratioAjustado) + ")");
                     }
-                    //Destruye sin un orden especifico solo al azar
-                    return operadoresDestruccion.destruccionAleatoria(solucion, ratioAjustado, minAjustado, maxAjustado);
+                    // Destruye sin un orden especifico solo al azar
+                    return operadoresDestruccion.destruccionAleatoria(solucion, ratioAjustado, minAjustado,
+                            maxAjustado);
                 case 1:
                     if (Constantes.LOGGING_VERBOSO) {
-                        System.out.println("    Ejecutando destruccionGeografica... (ratio: " + String.format("%.2f", ratioAjustado) + ")");
+                        System.out.println("    Ejecutando destruccionGeografica... (ratio: "
+                                + String.format("%.2f", ratioAjustado) + ")");
                     }
-                    //Elimina pedidos cercanos entre sí geográficamente (por ciudad o región).
-                    return operadoresDestruccion.destruccionGeografica(solucion, ratioAjustado, minAjustado, maxAjustado);
+                    // Elimina pedidos cercanos entre sí geográficamente (por ciudad o región).
+                    return operadoresDestruccion.destruccionGeografica(solucion, ratioAjustado, minAjustado,
+                            maxAjustado);
                 case 2:
                     if (Constantes.LOGGING_VERBOSO) {
-                        System.out.println("    Ejecutando destruccionBasadaEnTiempo... (ratio: " + String.format("%.2f", ratioAjustado) + ")");
+                        System.out.println("    Ejecutando destruccionBasadaEnTiempo... (ratio: "
+                                + String.format("%.2f", ratioAjustado) + ")");
                     }
-                    //Elimina pedidos cuyo deadline o fecha de entrega está cerca (urgentes o conflictivos).
-                    return operadoresDestruccion.destruccionBasadaEnTiempo(solucion, ratioAjustado, minAjustado, maxAjustado);
+                    // Elimina pedidos cuyo deadline o fecha de entrega está cerca (urgentes o
+                    // conflictivos).
+                    return operadoresDestruccion.destruccionBasadaEnTiempo(solucion, ratioAjustado, minAjustado,
+                            maxAjustado);
                 case 3:
                     if (Constantes.LOGGING_VERBOSO) {
-                        System.out.println("    Ejecutando destruccionRutaCongestionada... (ratio: " + String.format("%.2f", ratioAjustado) + ")");
+                        System.out.println("    Ejecutando destruccionRutaCongestionada... (ratio: "
+                                + String.format("%.2f", ratioAjustado) + ")");
                     }
-                    //Elimina pedidos que pasan por rutas o vuelos saturados.
-                    return operadoresDestruccion.destruccionRutaCongestionada(solucion, ratioAjustado, minAjustado, maxAjustado);
+                    // Elimina pedidos que pasan por rutas o vuelos saturados.
+                    return operadoresDestruccion.destruccionRutaCongestionada(solucion, ratioAjustado, minAjustado,
+                            maxAjustado);
                 default:
                     if (Constantes.LOGGING_VERBOSO) {
-                        System.out.println("    Ejecutando destruccionAleatoria (default)... (ratio: " + String.format("%.2f", ratioAjustado) + ")");
+                        System.out.println("    Ejecutando destruccionAleatoria (default)... (ratio: "
+                                + String.format("%.2f", ratioAjustado) + ")");
                     }
-                    //aleatorio como respaldo
-                    return operadoresDestruccion.destruccionAleatoria(solucion, ratioAjustado, minAjustado, maxAjustado);
+                    // aleatorio como respaldo
+                    return operadoresDestruccion.destruccionAleatoria(solucion, ratioAjustado, minAjustado,
+                            maxAjustado);
             }
         } catch (Exception e) {
             System.out.println("    Error en operador de destrucción: " + e.getMessage());
@@ -1252,7 +1365,7 @@ public class ALNSSolver {
                 if (usoOperadores[i][j] > 0) {
                     double puntajePromedio = puntajesOperadores[i][j] / usoOperadores[i][j];
                     pesosOperadores[i][j] = (1 - lambda) * pesosOperadores[i][j] +
-                                           lambda * puntajePromedio;
+                            lambda * puntajePromedio;
 
                     puntajesOperadores[i][j] = 0.0;
                     usoOperadores[i][j] = 0;
@@ -1296,16 +1409,16 @@ public class ALNSSolver {
         Map<Aeropuerto, Integer> snapshot = new HashMap<>();
         for (Aeropuerto aeropuerto : aeropuertos) {
             // CORREGIDO: Obtener del almacen directamente
-            int capacidad = (aeropuerto.getAlmacen() != null) 
-                ? aeropuerto.getAlmacen().getCapacidadUsada() 
-                : 0;
+            int capacidad = (aeropuerto.getAlmacen() != null)
+                    ? aeropuerto.getAlmacen().getCapacidadUsada()
+                    : 0;
             snapshot.put(aeropuerto, capacidad);
         }
         return snapshot;
     }
 
     private void restaurarAeropuertos(Map<Aeropuerto, Integer> snapshot) {
-        for(Aeropuerto aeropuerto : aeropuertos) {
+        for (Aeropuerto aeropuerto : aeropuertos) {
             // CORREGIDO: Restaurar en el almacen directamente
             if (aeropuerto.getAlmacen() != null) {
                 aeropuerto.getAlmacen().setCapacidadUsada(snapshot.getOrDefault(aeropuerto, 0));
@@ -1333,9 +1446,10 @@ public class ALNSSolver {
             }
         }
     }
+
     void actualizarCapacidadAeropuertos(String codigoAeropuertoDestino, int cantidad) {
-        for(Aeropuerto aeropuerto : aeropuertos) {
-            if(aeropuerto.getCodigoIATA().equals(codigoAeropuertoDestino)) {
+        for (Aeropuerto aeropuerto : aeropuertos) {
+            if (aeropuerto.getCodigoIATA().equals(codigoAeropuertoDestino)) {
                 // CORREGIDO: Actualizar el almacen directamente
                 if (aeropuerto.getAlmacen() != null) {
                     int capacidadActual = aeropuerto.getAlmacen().getCapacidadUsada();
@@ -1345,8 +1459,10 @@ public class ALNSSolver {
             }
         }
     }
+
     private boolean cabeEnCapacidad(ArrayList<Vuelo> ruta, int cantidad) {
-        if (ruta == null || ruta.isEmpty()) return true;
+        if (ruta == null || ruta.isEmpty())
+            return true;
 
         for (Vuelo vuelo : ruta) {
             if (vuelo.getCapacidadUsada() + cantidad > vuelo.getCapacidadMaxima()) {
@@ -1377,35 +1493,145 @@ public class ALNSSolver {
         for (Aeropuerto aeropuerto : aeropuertos) {
             if (aeropuerto != null && aeropuerto.getCodigoIATA() != null) {
                 cacheCodigoIATAAeropuerto.put(
-                    aeropuerto.getCodigoIATA().toUpperCase().trim(), 
-                    aeropuerto
-                );
+                        aeropuerto.getCodigoIATA().toUpperCase().trim(),
+                        aeropuerto);
             }
         }
         System.out.println("✓ Cache IATA inicializada: " + cacheCodigoIATAAeropuerto.size() + " aeropuertos");
     }
 
     private void inicializarT0() {
+        // NUEVO: Priorizar horaInicioSimulacion si fue proporcionada
+        // Esto sincroniza el ALNS con la hora de inicio definida por el usuario
+        if (this.horaInicioSimulacion != null) {
+            T0 = this.horaInicioSimulacion;
+            System.out.println("T0 sincronizado con horaInicioSimulacion: " + T0);
+            return;
+        }
+
+        // Fallback: usar mínimo de fechaPedido o LocalDateTime.now()
         T0 = LocalDateTime.now();
 
         if (pedidos != null && !pedidos.isEmpty()) {
             LocalDateTime minFechaPedido = pedidos.stream()
-                .filter(p -> p.getFechaPedido() != null)
-                .map(Pedido::getFechaPedido)
-                .min(LocalDateTime::compareTo)
-                .orElse(LocalDateTime.now());
+                    .filter(p -> p.getFechaPedido() != null)
+                    .map(Pedido::getFechaPedido)
+                    .min(LocalDateTime::compareTo)
+                    .orElse(LocalDateTime.now());
             T0 = minFechaPedido;
         }
 
-        System.out.println("T0 inicializado: " + T0);
+        System.out.println("T0 inicializado (fallback): " + T0);
     }
 
     /**
-     * Actualiza el ProductTracker con la mejor solución encontrada por el algoritmo ALNS.
+     * Obtiene el valor de T0 (ancla temporal del algoritmo).
+     * Útil para debugging y verificación de sincronización.
      * 
-     * Este método se llama UNA VEZ al final del algoritmo, no durante las iteraciones.
+     * @return LocalDateTime con el valor de T0
+     */
+    public LocalDateTime getT0() {
+        return this.T0;
+    }
+
+    /**
+     * NUEVO: Calcula los tiempos absolutos para una ruta de vuelos.
+     * Convierte la secuencia de vuelos en tramos con fechas exactas de
+     * salida/llegada.
      * 
-     * Para cada pedido en la mejor solución, asigna todos sus productos a la ruta correspondiente.
+     * @param pedido Pedido al que pertenece la ruta
+     * @param vuelos Lista de vuelos que forman la ruta
+     * @return RutaConTiempos con todos los tiempos calculados
+     */
+    private RutaConTiempos calcularTiemposRuta(Pedido pedido, ArrayList<Vuelo> vuelos) {
+        RutaConTiempos rutaConTiempos = RutaConTiempos.builder()
+                .pedido(pedido)
+                .tramos(new ArrayList<>())
+                .build();
+
+        if (vuelos == null || vuelos.isEmpty()) {
+            return rutaConTiempos;
+        }
+
+        // Punto de partida: fecha del pedido o T0
+        LocalDateTime tiempoActual = (pedido != null && pedido.getFechaPedido() != null)
+                ? pedido.getFechaPedido()
+                : T0;
+
+        double tiempoTotalHoras = 0.0;
+
+        for (int i = 0; i < vuelos.size(); i++) {
+            Vuelo vuelo = vuelos.get(i);
+
+            // Calcular hora de salida real (ajustar al próximo horario disponible)
+            LocalDateTime horaSalidaReal = calcularProximaSalida(tiempoActual, vuelo);
+
+            // Calcular hora de llegada usando tiempoTransporte del vuelo
+            double horasTransporte = vuelo.getTiempoTransporte();
+            if (horasTransporte <= 0) {
+                horasTransporte = 2.0; // Default: 2 horas si no hay dato
+            }
+            long minutosTransporte = (long) (horasTransporte * 60);
+            LocalDateTime horaLlegadaReal = horaSalidaReal.plusMinutes(minutosTransporte);
+
+            // Crear tramo con tiempos
+            TramoConTiempo tramo = TramoConTiempo.builder()
+                    .vuelo(vuelo)
+                    .horaSalidaReal(horaSalidaReal)
+                    .horaLlegadaReal(horaLlegadaReal)
+                    .indiceEnRuta(i)
+                    .build();
+
+            rutaConTiempos.agregarTramo(tramo);
+            tiempoTotalHoras += horasTransporte;
+
+            // Para el siguiente vuelo: llegada + tiempo de conexión (1 hora)
+            tiempoActual = horaLlegadaReal.plusMinutes(Constantes.TIEMPO_CONEXION_MINUTOS);
+        }
+
+        rutaConTiempos.setTiempoTotalHoras(tiempoTotalHoras);
+
+        return rutaConTiempos;
+    }
+
+    /**
+     * NUEVO: Calcula la próxima salida disponible de un vuelo.
+     * Considera la hora programada del vuelo y ajusta al día siguiente si ya pasó.
+     * 
+     * @param tiempoActual Momento actual desde el que se busca la próxima salida
+     * @param vuelo        Vuelo con su hora de salida programada
+     * @return LocalDateTime de la próxima salida disponible
+     */
+    private LocalDateTime calcularProximaSalida(LocalDateTime tiempoActual, Vuelo vuelo) {
+        if (tiempoActual == null) {
+            tiempoActual = T0 != null ? T0 : LocalDateTime.now();
+        }
+
+        // Si el vuelo no tiene hora de salida programada, usar tiempoActual
+        if (vuelo == null || vuelo.getHoraSalida() == null) {
+            return tiempoActual;
+        }
+
+        // Construir hora de salida para hoy
+        LocalDateTime salidaHoy = tiempoActual.toLocalDate().atTime(vuelo.getHoraSalida());
+
+        // Si ya pasó la hora de salida hoy, usar la de mañana
+        if (salidaHoy.isBefore(tiempoActual) || salidaHoy.equals(tiempoActual)) {
+            salidaHoy = salidaHoy.plusDays(1);
+        }
+
+        return salidaHoy;
+    }
+
+    /**
+     * Actualiza el ProductTracker con la mejor solución encontrada por el algoritmo
+     * ALNS.
+     * 
+     * Este método se llama UNA VEZ al final del algoritmo, no durante las
+     * iteraciones.
+     * 
+     * Para cada pedido en la mejor solución, asigna todos sus productos a la ruta
+     * correspondiente.
      */
     private void actualizarSeguimientoProductos() {
         if (productTracker == null) {
@@ -1418,33 +1644,40 @@ public class ALNSSolver {
             return;
         }
 
-        // Extraer el mapa de solución interno (mejorSolucion es un Map<HashMap<Pedido,ArrayList<Vuelo>>, Integer>)
+        // Extraer el mapa de solución interno (mejorSolucion es un
+        // Map<HashMap<Pedido,ArrayList<Vuelo>>, Integer>)
         HashMap<Pedido, ArrayList<Vuelo>> solucionActual = mejorSolucion.keySet().iterator().next();
-        
+
         if (solucionActual == null || solucionActual.isEmpty()) {
             System.out.println("⚠️ No hay asignaciones en la mejor solución");
             return;
         }
 
         int productosRastreados = 0;
-        
+        int productosConTiempos = 0;
+
         // Recorrer la MEJOR solución encontrada
         for (Map.Entry<Pedido, ArrayList<Vuelo>> entry : solucionActual.entrySet()) {
             Pedido pedido = entry.getKey();
             ArrayList<Vuelo> ruta = entry.getValue();
-            
-            // Asignar TODOS los productos de este pedido a su ruta
+
+            // NUEVO: Calcular tiempos absolutos para esta ruta
+            RutaConTiempos rutaConTiempos = calcularTiemposRuta(pedido, ruta);
+
+            // Asignar TODOS los productos de este pedido a su ruta CON TIEMPOS
             List<Producto> productos = pedido.getProductos();
             if (productos != null && !productos.isEmpty()) {
                 for (Producto producto : productos) {
                     if (producto != null && producto.getId() != null) {
-                        productTracker.assignProductToRoute(producto, ruta);
+                        // Usar el nuevo método que incluye tiempos
+                        productTracker.assignProductToRouteWithTimes(producto, rutaConTiempos);
                         productosRastreados++;
+                        productosConTiempos++;
                     }
                 }
             }
         }
-        
+
         System.out.println("✓ Productos rastreados: " + productosRastreados);
     }
 
@@ -1469,10 +1702,9 @@ public class ALNSSolver {
         int idUnico = pedidoOriginal.getId() * 1000 + indiceUnidad;
         unidad.setId(idUnico);
 
-
         unidad.setCliente(pedidoOriginal.getCliente());
-        //unidad.setAeropuertoDestinoCodigo(obtenerAeropuerto(pedidoOriginal.getAeropuertoDestinoCodigo()).getCodigoIATA());
-        //unidad.setAeropuertoOrigenCodigo(obtenerAeropuerto(pedidoOriginal.getAeropuertoOrigenCodigo()).getCodigoIATA());
+        // unidad.setAeropuertoDestinoCodigo(obtenerAeropuerto(pedidoOriginal.getAeropuertoDestinoCodigo()).getCodigoIATA());
+        // unidad.setAeropuertoOrigenCodigo(obtenerAeropuerto(pedidoOriginal.getAeropuertoOrigenCodigo()).getCodigoIATA());
         unidad.setAeropuertoOrigenCodigo(pedidoOriginal.getAeropuertoOrigenCodigo()); // ← Usar el código directamente
         unidad.setAeropuertoDestinoCodigo(pedidoOriginal.getAeropuertoDestinoCodigo());
         unidad.setFechaPedido(pedidoOriginal.getFechaPedido());
@@ -1486,34 +1718,37 @@ public class ALNSSolver {
     }
 
     private Aeropuerto obtenerAeropuertoPorCiudad(Ciudad ciudad) {
-        if (ciudad == null || ciudad.getNombre() == null) return null;
+        if (ciudad == null || ciudad.getNombre() == null)
+            return null;
         String claveCiudad = ciudad.getNombre().toLowerCase().trim();
         return cacheNombreCiudadAeropuerto.get(claveCiudad);
     }
 
     /**
-     * Encuentra una ruta directa entre dos ciudades, considerando disponibilidad por día.
+     * Encuentra una ruta directa entre dos ciudades, considerando disponibilidad
+     * por día.
      * OPTIMIZADO: Usa índice y cache de disponibilidad (O(1) en lugar de O(N))
      *
-     * @param origen Ciudad de origen
+     * @param origen  Ciudad de origen
      * @param destino Ciudad de destino
-     * @param dia Día de operación para verificar disponibilidad de vuelo
+     * @param dia     Día de operación para verificar disponibilidad de vuelo
      * @return Ruta directa si existe y está disponible, null en caso contrario
      */
     private ArrayList<Vuelo> encontrarRutaDirecta(Ciudad origen, Ciudad destino, int dia) {
-        if (origen == null || destino == null) return null;
+        if (origen == null || destino == null)
+            return null;
 
         Aeropuerto aeropuertoOrigen = obtenerAeropuertoPorCiudad(origen);
         Aeropuerto aeropuertoDestino = obtenerAeropuertoPorCiudad(destino);
 
-        if (aeropuertoOrigen == null || aeropuertoDestino == null) return null;
+        if (aeropuertoOrigen == null || aeropuertoDestino == null)
+            return null;
 
         // OPTIMIZACIÓN: Usar cache de disponibilidad en lugar de búsqueda lineal
         List<Vuelo> vuelosDisponibles = cacheDisponibilidad.obtenerVuelosDisponibles(
-            aeropuertoOrigen,
-            aeropuertoDestino,
-            dia
-        );
+                aeropuertoOrigen,
+                aeropuertoDestino,
+                dia);
 
         if (vuelosDisponibles.isEmpty()) {
             return null; // No hay vuelos directos disponibles en este día
@@ -1526,30 +1761,37 @@ public class ALNSSolver {
     }
 
     private boolean esRutaValida(Pedido pedido, ArrayList<Vuelo> ruta) {
-        if (pedido == null || ruta == null || ruta.isEmpty()) return false;
+        if (pedido == null || ruta == null || ruta.isEmpty())
+            return false;
 
         // OPTIMIZADO: Usar getCantidadProductosRapido()
         int qty = pedido.getCantidadProductosRapido();
 
-        if (!cabeEnCapacidad(ruta, qty)) return false;
+        if (!cabeEnCapacidad(ruta, qty))
+            return false;
 
         Aeropuerto expectedOrigin = obtenerAeropuerto(pedido.getAeropuertoOrigenCodigo());
-        if (expectedOrigin == null || !ruta.get(0).getAeropuertoOrigen().equals(expectedOrigin)) return false;
+        if (expectedOrigin == null || !ruta.get(0).getAeropuertoOrigen().equals(expectedOrigin))
+            return false;
 
         for (int i = 0; i < ruta.size() - 1; i++) {
-            if (!ruta.get(i).getAeropuertoDestino().equals(ruta.get(i + 1).getAeropuertoOrigen())) return false;
+            if (!ruta.get(i).getAeropuertoDestino().equals(ruta.get(i + 1).getAeropuertoOrigen()))
+                return false;
         }
 
         Aeropuerto expectedDestination = obtenerAeropuerto(pedido.getAeropuertoDestinoCodigo());
-        if (expectedDestination == null || !ruta.get(ruta.size() - 1).getAeropuertoDestino().equals(expectedDestination)) return false;
+        if (expectedDestination == null
+                || !ruta.get(ruta.size() - 1).getAeropuertoDestino().equals(expectedDestination))
+            return false;
 
         return seRespetaDeadline(pedido, ruta);
     }
 
     private boolean puedeAsignarConOptimizacionEspacio(Pedido pedido, ArrayList<Vuelo> ruta,
-                                                       HashMap<Pedido, ArrayList<Vuelo>> solucionActual) {
+            HashMap<Pedido, ArrayList<Vuelo>> solucionActual) {
         Aeropuerto aeropuertoDestino = obtenerAeropuerto(pedido.getAeropuertoDestinoCodigo());
-        if (aeropuertoDestino == null) return false;
+        if (aeropuertoDestino == null)
+            return false;
 
         // OPTIMIZADO: Usar getCantidadProductosRapido()
         int conteoProductos = pedido.getCantidadProductosRapido();
@@ -1582,15 +1824,59 @@ public class ALNSSolver {
     }
 
     private double calcularMargenTiempoRuta(Pedido pedido, ArrayList<Vuelo> ruta) {
-        if (pedido == null || ruta == null) return 1.0;
-        if (pedido.getFechaPedido() == null || pedido.getFechaLimiteEntrega() == null) return 1.0;
+        if (pedido == null || ruta == null)
+            return 1.0;
+        if (pedido.getFechaPedido() == null || pedido.getFechaLimiteEntrega() == null)
+            return 1.0;
 
         double tiempoTotal = 0.0;
-        for (Vuelo vuelo : ruta) tiempoTotal += vuelo.getTiempoTransporte();
-        if (ruta.size() > 1) tiempoTotal += (ruta.size() - 1) * 2.0;
+        for (Vuelo vuelo : ruta)
+            tiempoTotal += vuelo.getTiempoTransporte();
+        if (ruta.size() > 1)
+            tiempoTotal += (ruta.size() - 1) * 2.0;
 
         long horasDisponibles = ChronoUnit.HOURS.between(pedido.getFechaPedido(), pedido.getFechaLimiteEntrega());
         double margen = horasDisponibles - tiempoTotal;
+
+        // NUEVO: Penalizar escalas fuera del continente relevante
+        if (ruta.size() > 1) {
+            Aeropuerto aOrigen = obtenerAeropuerto(pedido.getAeropuertoOrigenCodigo());
+            Aeropuerto aDestino = obtenerAeropuerto(pedido.getAeropuertoDestinoCodigo());
+
+            // Verificaciones de null para evitar NullPointerException
+            if (aOrigen != null && aDestino != null &&
+                    aOrigen.getCiudad() != null && aDestino.getCiudad() != null) {
+
+                Continente contOrigen = aOrigen.getCiudad().getContinente();
+                Continente contDestino = aDestino.getCiudad().getContinente();
+
+                if (contOrigen != null && contDestino != null) {
+                    for (int i = 0; i < ruta.size() - 1; i++) {
+                        Vuelo vuelo = ruta.get(i);
+                        if (vuelo == null || vuelo.getAeropuertoDestino() == null ||
+                                vuelo.getAeropuertoDestino().getCiudad() == null) {
+                            continue;
+                        }
+
+                        Continente contEscala = vuelo.getAeropuertoDestino().getCiudad().getContinente();
+                        if (contEscala == null) {
+                            continue;
+                        }
+
+                        // Penalizar escala fuera de continentes relevantes
+                        if (contOrigen == contDestino && contEscala != contOrigen) {
+                            // Ruta local que cruza continentes innecesariamente
+                            margen -= 5.0;
+                        } else if (contOrigen != contDestino &&
+                                contEscala != contOrigen && contEscala != contDestino) {
+                            // Ruta intercontinental con escala en tercer continente
+                            margen -= 3.0;
+                        }
+                    }
+                }
+            }
+        }
+
         return Math.max(margen, 0.0) + 1.0;
     }
 
@@ -1632,10 +1918,12 @@ public class ALNSSolver {
                 // Ordenamiento por distancia entre continentes
                 System.out.println("Estrategia de ordenamiento: Por distancia entre continentes");
                 paquetesOrdenados.sort((p1, p2) -> {
-                    boolean p1DiffCont = obtenerAeropuerto(p1.getAeropuertoOrigenCodigo()).getCiudad().getContinente() !=
-                            obtenerAeropuerto(p1.getAeropuertoDestinoCodigo()).getCiudad().getContinente();
-                    boolean p2DiffCont = obtenerAeropuerto(p2.getAeropuertoOrigenCodigo()).getCiudad().getContinente() !=
-                            obtenerAeropuerto(p2.getAeropuertoDestinoCodigo()).getCiudad().getContinente();
+                    boolean p1DiffCont = obtenerAeropuerto(p1.getAeropuertoOrigenCodigo()).getCiudad()
+                            .getContinente() != obtenerAeropuerto(p1.getAeropuertoDestinoCodigo()).getCiudad()
+                                    .getContinente();
+                    boolean p2DiffCont = obtenerAeropuerto(p2.getAeropuertoOrigenCodigo()).getCiudad()
+                            .getContinente() != obtenerAeropuerto(p2.getAeropuertoDestinoCodigo()).getCiudad()
+                                    .getContinente();
                     return Boolean.compare(p1DiffCont, p2DiffCont);
                 });
                 break;
@@ -1669,9 +1957,11 @@ public class ALNSSolver {
         // Almacenar la solución con su peso
         solucion.put(solActual, pesoSolucion);
 
-        System.out.println("Solución inicial generada: " + paquetesAsignados + "/" + pedidos.size() + " pedidos asignados");
+        System.out.println(
+                "Solución inicial generada: " + paquetesAsignados + "/" + pedidos.size() + " pedidos asignados");
         System.out.println("Peso de la solución: " + pesoSolucion);
     }
+
     private void reiniciarCapacidades() {
         for (Vuelo vuelo : vuelos) {
             vuelo.setCapacidadUsada(0);
@@ -1699,12 +1989,12 @@ public class ALNSSolver {
                     if (cabeEnCapacidad(rutaAleatoria, conteoProductos)) {
                         Aeropuerto aeropuertoDestino = obtenerAeropuerto(pedido.getAeropuertoDestinoCodigo());
                         if (aeropuertoDestino != null &&
-                            puedeAsignarConOptimizacionEspacio(pedido, rutaAleatoria, solucionActual)) {
+                                puedeAsignarConOptimizacionEspacio(pedido, rutaAleatoria, solucionActual)) {
 
                             solucionActual.put(pedido, rutaAleatoria);
                             actualizarCapacidadesVuelos(rutaAleatoria, conteoProductos);
                             actualizarCapacidadAeropuertos(aeropuertoDestino.getCodigoIATA(), conteoProductos);
-                            //incrementarOcupacionAlmacen(aeropuertoDestino, conteoProductos);
+                            // incrementarOcupacionAlmacen(aeropuertoDestino, conteoProductos);
                             paquetesAsignados++;
                         }
                     }
@@ -1715,75 +2005,79 @@ public class ALNSSolver {
         int pesoSolucion = calcularPesoSolucion(solucionActual);
         solucion.put(solucionActual, pesoSolucion);
 
-        System.out.println("Solución inicial aleatoria generada: " + paquetesAsignados + "/" + pedidos.size() + " pedidos asignados");
+        System.out.println("Solución inicial aleatoria generada: " + paquetesAsignados + "/" + pedidos.size()
+                + " pedidos asignados");
         System.out.println("Peso de la solución: " + pesoSolucion);
     }
 
     private int generarSolucionOptima(HashMap<Pedido, ArrayList<Vuelo>> solucionActual,
-                                  ArrayList<Pedido> paquetesOrdenados) {
-    int paquetesAsignados = 0;
-    int maxIteraciones = 3; // Máximo número de iteraciones para reasignación
+            ArrayList<Pedido> paquetesOrdenados) {
+        int paquetesAsignados = 0;
+        int maxIteraciones = 3; // Máximo número de iteraciones para reasignación
 
-    System.out.println("Iniciando algoritmo optimizado con " + maxIteraciones + " iteraciones...");
+        System.out.println("Iniciando algoritmo optimizado con " + maxIteraciones + " iteraciones...");
 
-    for (int iteracion = 0; iteracion < maxIteraciones; iteracion++) {
-        if (iteracion > 0) {
-            System.out.println("Iteración " + iteracion + " - Reasignación dinámica...");
-            // En iteraciones posteriores, intentar reasignar pedidos no asignados
-            ArrayList<Pedido> paquetesNoAsignados = new ArrayList<>();
-            for (Pedido pkg : paquetesOrdenados) {
-                if (!solucionActual.containsKey(pkg)) {
-                    paquetesNoAsignados.add(pkg);
+        for (int iteracion = 0; iteracion < maxIteraciones; iteracion++) {
+            if (iteracion > 0) {
+                System.out.println("Iteración " + iteracion + " - Reasignación dinámica...");
+                // En iteraciones posteriores, intentar reasignar pedidos no asignados
+                ArrayList<Pedido> paquetesNoAsignados = new ArrayList<>();
+                for (Pedido pkg : paquetesOrdenados) {
+                    if (!solucionActual.containsKey(pkg)) {
+                        paquetesNoAsignados.add(pkg);
+                    }
                 }
+                paquetesOrdenados = paquetesNoAsignados;
             }
-            paquetesOrdenados = paquetesNoAsignados;
-        }
 
-        int asignadosEnIteracion = 0;
+            int asignadosEnIteracion = 0;
 
-        for (Pedido pkg : paquetesOrdenados) {
-            Aeropuerto aeropuertoDestino = obtenerAeropuerto(pkg.getAeropuertoDestinoCodigo());
-            if (aeropuertoDestino == null) continue;
+            for (Pedido pkg : paquetesOrdenados) {
+                Aeropuerto aeropuertoDestino = obtenerAeropuerto(pkg.getAeropuertoDestinoCodigo());
+                if (aeropuertoDestino == null)
+                    continue;
 
-            // OPTIMIZADO: Usar getCantidadProductosRapido()
-            int cantidadProductos = pkg.getCantidadProductosRapido();
+                // OPTIMIZADO: Usar getCantidadProductosRapido()
+                int cantidadProductos = pkg.getCantidadProductosRapido();
 
-            // Intentar asignar el paquete usando diferentes estrategias
-            ArrayList<Vuelo> mejorRuta = encontrarMejorRutaConVentanasDeTiempo(pkg, solucionActual);
+                // Intentar asignar el paquete usando diferentes estrategias
+                ArrayList<Vuelo> mejorRuta = encontrarMejorRutaConVentanasDeTiempo(pkg, solucionActual);
 
-            if (mejorRuta != null && esRutaValida(pkg, mejorRuta)) {
-                // Primero validar temporalmente sin actualizar capacidades
-                if (puedeAsignarConOptimizacionEspacio(pkg, mejorRuta, solucionActual)) {
-                    // Si la validación temporal pasa, entonces actualizar capacidades
-                    solucionActual.put(pkg, mejorRuta);
-                    paquetesAsignados++;
-                    asignadosEnIteracion++;
+                if (mejorRuta != null && esRutaValida(pkg, mejorRuta)) {
+                    // Primero validar temporalmente sin actualizar capacidades
+                    if (puedeAsignarConOptimizacionEspacio(pkg, mejorRuta, solucionActual)) {
+                        // Si la validación temporal pasa, entonces actualizar capacidades
+                        solucionActual.put(pkg, mejorRuta);
+                        paquetesAsignados++;
+                        asignadosEnIteracion++;
 
-                    // Actualizar capacidades DESPUÉS de la validación
-                    actualizarCapacidadesVuelos(mejorRuta, cantidadProductos);
-                    actualizarCapacidadAeropuertos(aeropuertoDestino.getCodigoIATA(), cantidadProductos);
-                    //incrementarOcupacionAlmacen(aeropuertoDestino, cantidadProductos);
+                        // Actualizar capacidades DESPUÉS de la validación
+                        actualizarCapacidadesVuelos(mejorRuta, cantidadProductos);
+                        actualizarCapacidadAeropuertos(aeropuertoDestino.getCodigoIATA(), cantidadProductos);
+                        // incrementarOcupacionAlmacen(aeropuertoDestino, cantidadProductos);
 
-                    if (iteracion > 0) {
-                        System.out.println("  Reasignado paquete " + pkg.getId() + " en iteración " + iteracion);
+                        if (iteracion > 0) {
+                            System.out.println("  Reasignado paquete " + pkg.getId() + " en iteración " + iteracion);
+                        }
                     }
                 }
             }
-        }
 
-        System.out.println("  Iteración " + iteracion + " completada: " + asignadosEnIteracion + " pedidos asignados");
+            System.out.println(
+                    "  Iteración " + iteracion + " completada: " + asignadosEnIteracion + " pedidos asignados");
 
-        // Si no se asignaron pedidos en esta iteración, no hay punto en continuar
-        if (asignadosEnIteracion == 0) {
-            break;
+            // Si no se asignaron pedidos en esta iteración, no hay punto en continuar
+            if (asignadosEnIteracion == 0) {
+                break;
+            }
         }
-    }
 
         return paquetesAsignados;
     }
 
-    private ArrayList<Vuelo> encontrarMejorRutaConVentanasDeTiempo(Pedido pedido, HashMap<Pedido, ArrayList<Vuelo>> solucionActual) {
-         // Primero intentar con el método original (ruta estándar)
+    private ArrayList<Vuelo> encontrarMejorRutaConVentanasDeTiempo(Pedido pedido,
+            HashMap<Pedido, ArrayList<Vuelo>> solucionActual) {
+        // Primero intentar con el método original (ruta estándar)
         ArrayList<Vuelo> rutaOriginal = encontrarMejorRuta(pedido);
 
         // Si no existe ruta original o no se puede asignar con optimización de espacio,
@@ -1797,20 +2091,20 @@ public class ALNSSolver {
     }
 
     private boolean puedeAsignarConOptimizacionDeEspacio(Pedido pedido,
-                                                         ArrayList<Vuelo> ruta,
-                                                         HashMap<Pedido, ArrayList<Vuelo>> solucionActual) {
-    // Validación simplificada de la capacidad del almacén final
-    Aeropuerto aeropuertoDestino = obtenerAeropuerto(pedido.getAeropuertoDestinoCodigo());
-    if (aeropuertoDestino == null) return false;
+            ArrayList<Vuelo> ruta,
+            HashMap<Pedido, ArrayList<Vuelo>> solucionActual) {
+        // Validación simplificada de la capacidad del almacén final
+        Aeropuerto aeropuertoDestino = obtenerAeropuerto(pedido.getAeropuertoDestinoCodigo());
+        if (aeropuertoDestino == null)
+            return false;
 
-    // OPTIMIZADO: Usar getCantidadProductosRapido()
-    int cantidadProductos = pedido.getCantidadProductosRapido();
-    int ocupacionActual = aeropuertoDestino.getCapacidadActual();
-    int capacidadMaxima = aeropuertoDestino.getCapacidadMaxima();
+        // OPTIMIZADO: Usar getCantidadProductosRapido()
+        int cantidadProductos = pedido.getCantidadProductosRapido();
+        int ocupacionActual = aeropuertoDestino.getCapacidadActual();
+        int capacidadMaxima = aeropuertoDestino.getCapacidadMaxima();
 
-    return (ocupacionActual + cantidadProductos) <= capacidadMaxima;
-}
-
+        return (ocupacionActual + cantidadProductos) <= capacidadMaxima;
+    }
 
     /**
      * Genera una ruta aleatoria para un pedido, considerando disponibilidad.
@@ -1823,12 +2117,14 @@ public class ALNSSolver {
         Ciudad origen = obtenerAeropuerto(pedido.getAeropuertoOrigenCodigo()).getCiudad();
         Ciudad destino = obtenerAeropuerto(pedido.getAeropuertoDestinoCodigo()).getCiudad();
 
-        if (origen == null || destino == null) return null;
+        if (origen == null || destino == null)
+            return null;
 
         Aeropuerto aeropuertoOrigen = obtenerAeropuertoPorCiudad(origen);
         Aeropuerto aeropuertoDestino = obtenerAeropuertoPorCiudad(destino);
 
-        if (aeropuertoOrigen == null || aeropuertoDestino == null) return null;
+        if (aeropuertoOrigen == null || aeropuertoDestino == null)
+            return null;
 
         // Calcular día de operación
         int dia = calcularDiaOperacion(pedido);
@@ -1845,7 +2141,8 @@ public class ALNSSolver {
 
         for (int i = 0; i < Math.min(5, aeropuertosBarajados.size()); i++) {
             Aeropuerto intermedio = aeropuertosBarajados.get(i);
-            if (intermedio.equals(aeropuertoOrigen) || intermedio.equals(aeropuertoDestino)) continue;
+            if (intermedio.equals(aeropuertoOrigen) || intermedio.equals(aeropuertoDestino))
+                continue;
 
             ArrayList<Vuelo> tramo1 = encontrarRutaDirecta(origen, intermedio.getCiudad(), dia);
             ArrayList<Vuelo> tramo2 = encontrarRutaDirecta(intermedio.getCiudad(), destino, dia);
@@ -1861,7 +2158,8 @@ public class ALNSSolver {
         return null; // No hay rutas disponibles en este día
     }
 
-    private ArrayList<Vuelo> encontrarMejorRutaConVentanasTiempo(Pedido pedido, HashMap<Pedido, ArrayList<Vuelo>> solucionActual) {
+    private ArrayList<Vuelo> encontrarMejorRutaConVentanasTiempo(Pedido pedido,
+            HashMap<Pedido, ArrayList<Vuelo>> solucionActual) {
         ArrayList<Vuelo> rutaOriginal = encontrarMejorRuta(pedido);
         if (rutaOriginal == null || !puedeAsignarConOptimizacionEspacio(pedido, rutaOriginal, solucionActual)) {
             return encontrarRutaConSalidaRetrasada(pedido, solucionActual);
@@ -1870,10 +2168,11 @@ public class ALNSSolver {
     }
 
     private ArrayList<Vuelo> encontrarRutaConSalidaRetrasada(Pedido pedido,
-                                                             HashMap<Pedido, ArrayList<Vuelo>> solucionActual) {
+            HashMap<Pedido, ArrayList<Vuelo>> solucionActual) {
         for (int delayHours = 2; delayHours <= 12; delayHours += 2) {
             Pedido pedidoRetrasado = crearPaqueteRetrasado(pedido, delayHours);
-            if (pedidoRetrasado == null) continue;
+            if (pedidoRetrasado == null)
+                continue;
 
             ArrayList<Vuelo> ruta = encontrarMejorRuta(pedidoRetrasado);
             if (ruta != null && puedeAsignarConOptimizacionEspacio(pedidoRetrasado, ruta, solucionActual)) {
@@ -1902,9 +2201,11 @@ public class ALNSSolver {
     }
 
     /**
-     * OPTIMIZADO: Encuentra la mejor ruta para un pedido considerando disponibilidad de vuelos.
+     * OPTIMIZADO: Encuentra la mejor ruta para un pedido considerando
+     * disponibilidad de vuelos.
      * Usa cache de rutas para evitar recalcular rutas repetidas.
-     * Intenta rutas directas primero, luego con 1 escala, y finalmente con 2 escalas.
+     * Intenta rutas directas primero, luego con 1 escala, y finalmente con 2
+     * escalas.
      *
      * @param pedido Pedido para el cual buscar ruta
      * @return Mejor ruta encontrada, o null si no hay rutas disponibles
@@ -1912,10 +2213,10 @@ public class ALNSSolver {
     private ArrayList<Vuelo> encontrarMejorRuta(Pedido pedido) {
         String codigoOrigen = pedido.getAeropuertoOrigenCodigo();
         String codigoDestino = pedido.getAeropuertoDestinoCodigo();
-        
+
         // Calcular día de operación para verificar disponibilidad
         int dia = calcularDiaOperacion(pedido);
-        
+
         // OPTIMIZACIÓN: Intentar obtener rutas desde cache
         List<ArrayList<Vuelo>> rutasCacheadas = cacheRutas.obtenerRutasCalculadas(codigoOrigen, codigoDestino, dia);
         if (rutasCacheadas != null && !rutasCacheadas.isEmpty()) {
@@ -1925,7 +2226,7 @@ public class ALNSSolver {
                 return mejorRutaCacheada;
             }
         }
-        
+
         // Cache miss: calcular rutas normalmente
         Ciudad origen = obtenerAeropuerto(codigoOrigen).getCiudad();
         Ciudad destino = obtenerAeropuerto(codigoDestino).getCiudad();
@@ -1961,7 +2262,7 @@ public class ALNSSolver {
             rutasValidas.add(dosEscalas);
             puntajesRuta.add(calcularMargenTiempoRuta(pedido, dosEscalas));
         }
-        
+
         // OPTIMIZACIÓN: Guardar rutas encontradas en cache
         if (!rutasValidas.isEmpty()) {
             cacheRutas.guardarRutas(codigoOrigen, codigoDestino, dia, rutasValidas);
@@ -1971,7 +2272,7 @@ public class ALNSSolver {
             // No hay rutas disponibles en este día (posiblemente por cancelaciones)
             if (Constantes.LOGGING_VERBOSO) {
                 System.out.println("No se encontraron rutas disponibles para pedido " + pedido.getId() +
-                                 " en día " + dia + " (cancelaciones activas)");
+                        " en día " + dia + " (cancelaciones activas)");
             }
             return null;
         }
@@ -1980,7 +2281,8 @@ public class ALNSSolver {
         int indiceSeleccionado;
         if (total > 1) {
             double suma = 0;
-            for (double p : puntajesRuta) suma += p;
+            for (double p : puntajesRuta)
+                suma += p;
             if (suma > 0) {
                 double rand = aleatorio.nextDouble() * suma;
                 double acum = 0;
@@ -2007,13 +2309,13 @@ public class ALNSSolver {
      * Usa el mismo criterio que encontrarMejorRuta() para mantener consistencia.
      * 
      * @param pedido Pedido para el cual seleccionar ruta
-     * @param rutas Lista de rutas válidas desde cache
+     * @param rutas  Lista de rutas válidas desde cache
      * @return Mejor ruta seleccionada, o null si ninguna es válida
      */
     private ArrayList<Vuelo> seleccionarMejorRutaDeLista(Pedido pedido, List<ArrayList<Vuelo>> rutas) {
         ArrayList<ArrayList<Vuelo>> rutasValidas = new ArrayList<>();
         ArrayList<Double> puntajesRuta = new ArrayList<>();
-        
+
         // Filtrar rutas que siguen siendo válidas
         for (ArrayList<Vuelo> ruta : rutas) {
             if (ruta != null && esRutaValida(pedido, ruta)) {
@@ -2021,24 +2323,25 @@ public class ALNSSolver {
                 puntajesRuta.add(calcularMargenTiempoRuta(pedido, ruta));
             }
         }
-        
+
         if (rutasValidas.isEmpty()) {
             return null;
         }
-        
+
         // Selección probabilística basada en puntajes
         int total = rutasValidas.size();
         if (total == 1) {
             return rutasValidas.get(0);
         }
-        
+
         double suma = 0;
-        for (double p : puntajesRuta) suma += p;
-        
+        for (double p : puntajesRuta)
+            suma += p;
+
         if (suma <= 0) {
             return rutasValidas.get(0);
         }
-        
+
         double rand = aleatorio.nextDouble() * suma;
         double acum = 0;
         for (int i = 0; i < puntajesRuta.size(); i++) {
@@ -2047,41 +2350,124 @@ public class ALNSSolver {
                 return rutasValidas.get(i);
             }
         }
-        
+
         return rutasValidas.get(rutasValidas.size() - 1);
     }
 
     /**
-     * Encuentra una ruta con una escala entre dos ciudades, considerando disponibilidad.
-     * OPTIMIZADO: Usa índice de vuelos salientes en lugar de búsqueda lineal
+     * Calcula un score de preferencia para usar un aeropuerto como escala.
+     * Prioriza escalas en el mismo continente y penaliza aeropuertos saturados.
      *
-     * @param origen Ciudad de origen
+     * @param escala      Aeropuerto candidato para escala
+     * @param contOrigen  Continente del aeropuerto de origen
+     * @param contDestino Continente del aeropuerto de destino
+     * @return Score de preferencia (mayor = mejor)
+     */
+    private int calcularScoreEscala(Aeropuerto escala, Continente contOrigen, Continente contDestino) {
+        int score = 100;
+
+        // Verificación de null para evitar NullPointerException
+        if (escala == null || escala.getCiudad() == null || escala.getCiudad().getContinente() == null) {
+            return score; // Score neutral si no hay datos de continente
+        }
+
+        Continente contEscala = escala.getCiudad().getContinente();
+
+        // Si no tenemos información de continentes de origen/destino, retornar score
+        // neutral
+        if (contOrigen == null || contDestino == null) {
+            return score;
+        }
+
+        // REGLA 1: Mismo continente origen-destino → escala debe estar ahí
+        if (contOrigen == contDestino) {
+            if (contEscala == contOrigen) {
+                score += Constantes.BONUS_ESCALA_MISMO_CONTINENTE;
+            } else {
+                // Penalizar fuertemente cruzar continentes innecesariamente
+                score -= Constantes.PENALIZACION_ESCALA_FUERA_CONTINENTE;
+            }
+        } else {
+            // REGLA 2: Ruta intercontinental → escala en origen O destino es mejor
+            if (contEscala == contOrigen || contEscala == contDestino) {
+                score += 30; // Bonus por estar en continente relevante
+            } else {
+                // Escala en tercer continente (ni origen ni destino)
+                score -= Constantes.PENALIZACION_ESCALA_TERCER_CONTINENTE;
+            }
+        }
+
+        // REGLA 3: Balanceo - penalizar aeropuertos muy usados/saturados
+        double saturacion = (double) escala.getCapacidadActual() / Math.max(escala.getCapacidadMaxima(), 1);
+        if (saturacion > Constantes.UMBRAL_SATURACION_AEROPUERTO) {
+            score -= (int) ((saturacion - Constantes.UMBRAL_SATURACION_AEROPUERTO) * 100);
+        }
+
+        return score;
+    }
+
+    /**
+     * Encuentra una ruta con una escala entre dos ciudades, considerando
+     * disponibilidad.
+     * OPTIMIZADO: Usa selección inteligente de escalas basada en continente y
+     * saturación.
+     *
+     * @param origen  Ciudad de origen
      * @param destino Ciudad de destino
-     * @param dia Día de operación para verificar disponibilidad
-     * @return Ruta con una escala si existe y está disponible, null en caso contrario
+     * @param dia     Día de operación para verificar disponibilidad
+     * @return Ruta con una escala si existe y está disponible, null en caso
+     *         contrario
      */
     private ArrayList<Vuelo> encontrarRutaUnaEscala(Ciudad origen, Ciudad destino, int dia) {
         Aeropuerto aOrigen = obtenerAeropuertoPorCiudad(origen);
         Aeropuerto aDestino = obtenerAeropuertoPorCiudad(destino);
-        if (aOrigen == null || aDestino == null) return null;
+        if (aOrigen == null || aDestino == null)
+            return null;
 
         // OPTIMIZACIÓN: Obtener aeropuertos intermedios viables desde el índice
         List<Vuelo> vuelosSalidaOrigen = indiceVuelos.obtenerVuelosSalientes(aOrigen);
 
         // Generar lista de aeropuertos intermedios únicos
+        // IMPORTANTE: Excluir almacenes principales como escalas (Lima, Bruselas, Baku)
+        // ya que son puntos de origen, no de tránsito
         ArrayList<Aeropuerto> posibles = new ArrayList<>();
         for (Vuelo v : vuelosSalidaOrigen) {
             Aeropuerto destVuelo = v.getAeropuertoDestino();
             if (!destVuelo.equals(aDestino) && !posibles.contains(destVuelo)) {
-                posibles.add(destVuelo);
+                // No usar almacenes principales como escala
+                String nombreCiudad = destVuelo.getCiudad() != null ? destVuelo.getCiudad().getNombre() : null;
+                if (!Constantes.esAlmacenPrincipal(nombreCiudad)) {
+                    posibles.add(destVuelo);
+                }
             }
         }
-        Collections.shuffle(posibles, aleatorio);
+
+        // OPTIMIZACIÓN: Ordenar escalas por preferencia (mismo continente, menos
+        // saturados)
+        // en lugar de selección aleatoria
+        final Continente contOrigen = (origen != null) ? origen.getContinente() : null;
+        final Continente contDestino = (destino != null) ? destino.getContinente() : null;
+
+        // Si tenemos información de continentes, ordenar por preferencia
+        // Si no, mantener orden aleatorio para diversidad
+        if (contOrigen != null && contDestino != null) {
+            posibles.sort((a, b) -> {
+                int scoreA = calcularScoreEscala(a, contOrigen, contDestino);
+                int scoreB = calcularScoreEscala(b, contOrigen, contDestino);
+                // Agregar componente aleatorio pequeño para mantener diversidad
+                scoreA += aleatorio.nextInt(20) - 10;
+                scoreB += aleatorio.nextInt(20) - 10;
+                return Integer.compare(scoreB, scoreA); // Mayor score primero
+            });
+        } else {
+            Collections.shuffle(posibles, aleatorio);
+        }
 
         // Buscar conexión viable usando cache de disponibilidad
         for (Aeropuerto escala : posibles) {
             List<Vuelo> primerTramo = cacheDisponibilidad.obtenerVuelosDisponibles(aOrigen, escala, dia);
-            if (primerTramo.isEmpty()) continue;
+            if (primerTramo.isEmpty())
+                continue;
 
             // Buscar vuelo con capacidad disponible
             Vuelo primero = null;
@@ -2091,10 +2477,12 @@ public class ALNSSolver {
                     break;
                 }
             }
-            if (primero == null) continue;
+            if (primero == null)
+                continue;
 
             List<Vuelo> segundoTramo = cacheDisponibilidad.obtenerVuelosDisponibles(escala, aDestino, dia);
-            if (segundoTramo.isEmpty()) continue;
+            if (segundoTramo.isEmpty())
+                continue;
 
             // Buscar vuelo con capacidad disponible
             Vuelo segundo = null;
@@ -2116,45 +2504,86 @@ public class ALNSSolver {
     }
 
     /**
-     * Encuentra una ruta con dos escalas entre dos ciudades, considerando disponibilidad.
-     * OPTIMIZADO: Usa cache de disponibilidad en lugar de verificación directa
+     * Encuentra una ruta con dos escalas entre dos ciudades, considerando
+     * disponibilidad.
+     * OPTIMIZADO: Usa selección inteligente de escalas basada en continente y
+     * saturación.
      *
-     * @param origen Ciudad de origen
+     * @param origen  Ciudad de origen
      * @param destino Ciudad de destino
-     * @param dia Día de operación para verificar disponibilidad
-     * @return Ruta con dos escalas si existe y está disponible, null en caso contrario
+     * @param dia     Día de operación para verificar disponibilidad
+     * @return Ruta con dos escalas si existe y está disponible, null en caso
+     *         contrario
      */
     private ArrayList<Vuelo> encontrarRutaDosEscalas(Ciudad origen, Ciudad destino, int dia) {
         Aeropuerto aOrigen = obtenerAeropuertoPorCiudad(origen);
         Aeropuerto aDestino = obtenerAeropuertoPorCiudad(destino);
-        if (aOrigen == null || aDestino == null) return null;
+        if (aOrigen == null || aDestino == null)
+            return null;
+
+        // Obtener continentes para ordenamiento inteligente
+        final Continente contOrigen = (origen != null) ? origen.getContinente() : null;
+        final Continente contDestino = (destino != null) ? destino.getContinente() : null;
+        final boolean tieneContinentes = contOrigen != null && contDestino != null;
 
         // OPTIMIZACIÓN: Obtener aeropuertos alcanzables desde origen
+        // IMPORTANTE: Excluir almacenes principales como escalas
         List<Vuelo> vuelosSalidaOrigen = indiceVuelos.obtenerVuelosSalientes(aOrigen);
         ArrayList<Aeropuerto> primeras = new ArrayList<>();
         for (Vuelo v : vuelosSalidaOrigen) {
             Aeropuerto destVuelo = v.getAeropuertoDestino();
             if (!destVuelo.equals(aDestino) && !primeras.contains(destVuelo)) {
-                primeras.add(destVuelo);
+                String nombreCiudad = destVuelo.getCiudad() != null ? destVuelo.getCiudad().getNombre() : null;
+                if (!Constantes.esAlmacenPrincipal(nombreCiudad)) {
+                    primeras.add(destVuelo);
+                }
             }
         }
-        Collections.shuffle(primeras, aleatorio);
+
+        // Ordenar primera escala por preferencia de continente (si hay datos)
+        if (tieneContinentes) {
+            primeras.sort((a, b) -> {
+                int scoreA = calcularScoreEscala(a, contOrigen, contDestino);
+                int scoreB = calcularScoreEscala(b, contOrigen, contDestino);
+                scoreA += aleatorio.nextInt(20) - 10;
+                scoreB += aleatorio.nextInt(20) - 10;
+                return Integer.compare(scoreB, scoreA);
+            });
+        } else {
+            Collections.shuffle(primeras, aleatorio);
+        }
         int maxPrimeras = Math.min(10, primeras.size());
 
         for (int i = 0; i < maxPrimeras; i++) {
             Aeropuerto p1 = primeras.get(i);
 
             // OPTIMIZACIÓN: Obtener aeropuertos alcanzables desde p1
+            // IMPORTANTE: Excluir almacenes principales como escalas
             List<Vuelo> vuelosSalidaP1 = indiceVuelos.obtenerVuelosSalientes(p1);
             ArrayList<Aeropuerto> segundas = new ArrayList<>();
             for (Vuelo v : vuelosSalidaP1) {
                 Aeropuerto destVuelo = v.getAeropuertoDestino();
                 if (!destVuelo.equals(aOrigen) && !destVuelo.equals(aDestino) &&
-                    !destVuelo.equals(p1) && !segundas.contains(destVuelo)) {
-                    segundas.add(destVuelo);
+                        !destVuelo.equals(p1) && !segundas.contains(destVuelo)) {
+                    String nombreCiudad = destVuelo.getCiudad() != null ? destVuelo.getCiudad().getNombre() : null;
+                    if (!Constantes.esAlmacenPrincipal(nombreCiudad)) {
+                        segundas.add(destVuelo);
+                    }
                 }
             }
-            Collections.shuffle(segundas, aleatorio);
+
+            // Ordenar segunda escala por preferencia de continente (si hay datos)
+            if (tieneContinentes) {
+                segundas.sort((a, b) -> {
+                    int scoreA = calcularScoreEscala(a, contOrigen, contDestino);
+                    int scoreB = calcularScoreEscala(b, contOrigen, contDestino);
+                    scoreA += aleatorio.nextInt(20) - 10;
+                    scoreB += aleatorio.nextInt(20) - 10;
+                    return Integer.compare(scoreB, scoreA);
+                });
+            } else {
+                Collections.shuffle(segundas, aleatorio);
+            }
             int maxSeg = Math.min(10, segundas.size());
 
             for (int j = 0; j < maxSeg; j++) {
@@ -2162,43 +2591,54 @@ public class ALNSSolver {
 
                 // Buscar vuelos usando cache de disponibilidad
                 List<Vuelo> primerTramo = cacheDisponibilidad.obtenerVuelosDisponibles(aOrigen, p1, dia);
-                if (primerTramo.isEmpty()) continue;
+                if (primerTramo.isEmpty())
+                    continue;
 
                 Vuelo f1 = null;
                 for (Vuelo v : primerTramo) {
                     if (v.getCapacidadUsada() < v.getCapacidadMaxima()) {
-                        f1 = v; break;
+                        f1 = v;
+                        break;
                     }
                 }
-                if (f1 == null) continue;
+                if (f1 == null)
+                    continue;
 
                 List<Vuelo> segundoTramo = cacheDisponibilidad.obtenerVuelosDisponibles(p1, p2, dia);
-                if (segundoTramo.isEmpty()) continue;
+                if (segundoTramo.isEmpty())
+                    continue;
 
                 Vuelo f2 = null;
                 for (Vuelo v : segundoTramo) {
                     if (v.getCapacidadUsada() < v.getCapacidadMaxima()) {
-                        f2 = v; break;
+                        f2 = v;
+                        break;
                     }
                 }
-                if (f2 == null) continue;
+                if (f2 == null)
+                    continue;
 
                 List<Vuelo> tercerTramo = cacheDisponibilidad.obtenerVuelosDisponibles(p2, aDestino, dia);
-                if (tercerTramo.isEmpty()) continue;
+                if (tercerTramo.isEmpty())
+                    continue;
 
                 Vuelo f3 = null;
                 for (Vuelo v : tercerTramo) {
                     if (v.getCapacidadUsada() < v.getCapacidadMaxima()) {
-                        f3 = v; break;
+                        f3 = v;
+                        break;
                     }
                 }
 
                 if (f3 != null) {
                     ArrayList<Vuelo> ruta = new ArrayList<>();
-                    ruta.add(f1); ruta.add(f2); ruta.add(f3);
+                    ruta.add(f1);
+                    ruta.add(f2);
+                    ruta.add(f3);
                     double tiempoTotal = f1.getTiempoTransporte() + f2.getTiempoTransporte() + f3.getTiempoTransporte();
                     tiempoTotal += 2.0;
-                    if (tiempoTotal > Constantes.TIEMPO_MAX_ENTREGA_DIFERENTE_CONTINENTE * 24) continue;
+                    if (tiempoTotal > Constantes.TIEMPO_MAX_ENTREGA_DIFERENTE_CONTINENTE * 24)
+                        continue;
                     return ruta;
                 }
             }
@@ -2209,14 +2649,18 @@ public class ALNSSolver {
     private boolean seRespetaDeadline(Pedido pedido, ArrayList<Vuelo> ruta) {
         // Validación inicial
         if (ruta == null || ruta.isEmpty()) {
-            //System.out.println("⚠️ Pedido " + pedido.getId() + " no tiene vuelos asignados en la ruta.");
+            // System.out.println("⚠️ Pedido " + pedido.getId() + " no tiene vuelos
+            // asignados en la ruta.");
             return false;
         }
         double tiempoTotal = 0;
-        for (Vuelo v : ruta) tiempoTotal += v.getTiempoTransporte();
-        if (ruta.size() > 1) tiempoTotal += (ruta.size() - 1) * 2.0;
+        for (Vuelo v : ruta)
+            tiempoTotal += v.getTiempoTransporte();
+        if (ruta.size() > 1)
+            tiempoTotal += (ruta.size() - 1) * 2.0;
 
-        if (!validarPromesaEntregaMoraPack(pedido, tiempoTotal)) return false;
+        if (!validarPromesaEntregaMoraPack(pedido, tiempoTotal))
+            return false;
 
         double margenSeguridad = 0.0;
         if (aleatorio != null) {
@@ -2258,7 +2702,7 @@ public class ALNSSolver {
         if (tiempoTotalHoras > horasPromesa) {
             if (DEBUG_MODE) {
                 System.out.println("VIOLACIÓN PROMESA MORAPACK - Pedido " + pedido.getId() +
-                    ": " + tiempoTotalHoras + "h > " + horasPromesa + "h");
+                        ": " + tiempoTotalHoras + "h > " + horasPromesa + "h");
             }
             return false;
         }
@@ -2267,14 +2711,15 @@ public class ALNSSolver {
         if (tiempoTotalHoras > horasHastaDeadline) {
             if (DEBUG_MODE) {
                 System.out.println("VIOLACIÓN DEADLINE CLIENTE - Pedido " + pedido.getId() +
-                    ": " + tiempoTotalHoras + "h > " + horasHastaDeadline + "h disponibles");
+                        ": " + tiempoTotalHoras + "h > " + horasHastaDeadline + "h disponibles");
             }
             return false;
         }
 
         if (!esSedeMoraPack(origen)) {
             if (DEBUG_MODE) {
-                System.out.println("ADVERTENCIA - Pedido " + pedido.getId() + " no origina desde sede MoraPack: " + origen.getNombre());
+                System.out.println("ADVERTENCIA - Pedido " + pedido.getId() + " no origina desde sede MoraPack: "
+                        + origen.getNombre());
             }
         }
 
@@ -2282,9 +2727,11 @@ public class ALNSSolver {
     }
 
     private boolean esSedeMoraPack(Ciudad ciudad) {
-        if (ciudad == null || ciudad.getNombre() == null) return false;
+        if (ciudad == null || ciudad.getNombre() == null)
+            return false;
         String nombre = ciudad.getNombre().toLowerCase();
-        return nombre.contains("lima") || nombre.contains("bruselas") || nombre.contains("brussels") || nombre.contains("baku");
+        return nombre.contains("lima") || nombre.contains("bruselas") || nombre.contains("brussels")
+                || nombre.contains("baku");
     }
 
     private int calcularPesoSolucion(HashMap<Pedido, ArrayList<Vuelo>> mapaSolucion) {
@@ -2311,13 +2758,14 @@ public class ALNSSolver {
                 totalVuelosUsados++;
             }
 
-            if (ruta.size() > 1) tiempoRuta += (ruta.size() - 1) * 2.0;
+            if (ruta.size() > 1)
+                tiempoRuta += (ruta.size() - 1) * 2.0;
 
             tiempoTotalEntrega += tiempoRuta;
 
             if (seRespetaDeadline(pedido, ruta)) {
                 entregasATiempo++;
-                LocalDateTime entregaEstimada = pedido.getFechaPedido().plusHours((long)tiempoRuta);
+                LocalDateTime entregaEstimada = pedido.getFechaPedido().plusHours((long) tiempoRuta);
                 double horasMargen = ChronoUnit.HOURS.between(entregaEstimada, pedido.getFechaLimiteEntrega());
                 margenEntregaTotal += horasMargen;
             }
@@ -2330,82 +2778,183 @@ public class ALNSSolver {
 
         double eficienciaContinental = calcularEficienciaContinental(mapaSolucion);
         double utilizacionAlmacenes = calcularUtilizacionAlmacenes();
+        double penalizacionConcentracion = calcularPenalizacionConcentracion(mapaSolucion);
 
-        int peso = (int) (
-            totalPaquetes * 100000 +
-            totalProductos * 10000 +
-            tasaATiempo * 5000 +
-            Math.min(margenPromedioEntrega * 50, 1000) +
-            eficienciaContinental * 500 +
-            utilizacionCapacidadPromedio * 200 +
-            utilizacionAlmacenes * 100 -
-            tiempoPromedioEntrega * 20 -
-            calcularComplejidadRuteo(mapaSolucion) * 50
-        );
+        int peso = (int) (totalPaquetes * 100000 +
+                totalProductos * 10000 +
+                tasaATiempo * 5000 +
+                Math.min(margenPromedioEntrega * 50, 1000) +
+                eficienciaContinental * 500 +
+                utilizacionCapacidadPromedio * 200 +
+                utilizacionAlmacenes * 100 -
+                tiempoPromedioEntrega * 20 -
+                calcularComplejidadRuteo(mapaSolucion) * 50 -
+                penalizacionConcentracion * Constantes.PESO_PENALIZACION_CONCENTRACION);
 
         if (tasaATiempo < 0.8) {
-            peso = (int)(peso * 0.5);
+            peso = (int) (peso * 0.5);
         }
 
         if (tasaATiempo >= 0.95 && totalPaquetes > 10) {
-            peso = (int)(peso * 1.1);
+            peso = (int) (peso * 1.1);
         }
 
         if (totalPaquetes > 1000) {
-            peso = (int)(peso * 1.15);
+            peso = (int) (peso * 1.15);
         }
 
         return peso;
     }
 
+    /**
+     * Calcula una penalización por concentración de escalas en pocos aeropuertos.
+     * Evita que un solo aeropuerto (como Bogotá) acumule demasiadas escalas.
+     *
+     * @param solucion Mapa de solución actual
+     * @return Penalización (mayor = peor distribución)
+     */
+    private double calcularPenalizacionConcentracion(HashMap<Pedido, ArrayList<Vuelo>> solucion) {
+        Map<String, Integer> usosComoEscala = new HashMap<>();
+        int totalEscalas = 0;
+
+        for (ArrayList<Vuelo> ruta : solucion.values()) {
+            if (ruta != null && ruta.size() > 1) {
+                // Los aeropuertos intermedios (destino de cada vuelo excepto el último) son
+                // escalas
+                for (int i = 0; i < ruta.size() - 1; i++) {
+                    Vuelo vuelo = ruta.get(i);
+                    if (vuelo == null || vuelo.getAeropuertoDestino() == null) {
+                        continue;
+                    }
+                    String codigoEscala = vuelo.getAeropuertoDestino().getCodigoIATA();
+                    if (codigoEscala != null) {
+                        usosComoEscala.merge(codigoEscala, 1, Integer::sum);
+                        totalEscalas++;
+                    }
+                }
+            }
+        }
+
+        if (totalEscalas == 0)
+            return 0;
+
+        double penalizacion = 0;
+
+        // Penalizar aeropuertos que excedan el umbral de concentración
+        for (int usos : usosComoEscala.values()) {
+            double proporcion = (double) usos / totalEscalas;
+            if (proporcion > Constantes.UMBRAL_CONCENTRACION_ESCALA) {
+                // Penalización cuadrática para concentraciones excesivas
+                penalizacion += Math.pow(proporcion - Constantes.UMBRAL_CONCENTRACION_ESCALA, 2) * 1000;
+            }
+        }
+
+        return penalizacion;
+    }
+
     private double calcularEficienciaContinental(HashMap<Pedido, ArrayList<Vuelo>> mapaSolucion) {
-        if (mapaSolucion.isEmpty()) return 0.0;
+        if (mapaSolucion.isEmpty())
+            return 0.0;
 
         int sameDirect = 0, sameOneStop = 0, diffDirect = 0, diffOneStop = 0, inefficient = 0;
+        int escalasFueraContinente = 0; // NUEVO: Contador de escalas problemáticas
 
         for (Map.Entry<Pedido, ArrayList<Vuelo>> e : mapaSolucion.entrySet()) {
             Pedido p = e.getKey();
             ArrayList<Vuelo> ruta = e.getValue();
-            boolean mismo = obtenerAeropuerto(p.getAeropuertoOrigenCodigo()).getCiudad().getContinente() ==
-                    obtenerAeropuerto(p.getAeropuertoDestinoCodigo()).getCiudad().getContinente();
-            if (ruta.isEmpty()) continue;
+
+            Aeropuerto aOrigen = obtenerAeropuerto(p.getAeropuertoOrigenCodigo());
+            Aeropuerto aDestino = obtenerAeropuerto(p.getAeropuertoDestinoCodigo());
+
+            if (aOrigen == null || aDestino == null || ruta.isEmpty())
+                continue;
+
+            // Verificaciones de null para ciudades y continentes
+            if (aOrigen.getCiudad() == null || aDestino.getCiudad() == null)
+                continue;
+
+            Continente contOrigen = aOrigen.getCiudad().getContinente();
+            Continente contDestino = aDestino.getCiudad().getContinente();
+
+            if (contOrigen == null || contDestino == null)
+                continue;
+
+            boolean mismo = contOrigen == contDestino;
+
+            // NUEVO: Verificar si las escalas están en continentes apropiados
+            if (ruta.size() > 1) {
+                for (int i = 0; i < ruta.size() - 1; i++) {
+                    Vuelo vuelo = ruta.get(i);
+                    if (vuelo == null || vuelo.getAeropuertoDestino() == null ||
+                            vuelo.getAeropuertoDestino().getCiudad() == null) {
+                        continue;
+                    }
+
+                    Continente contEscala = vuelo.getAeropuertoDestino().getCiudad().getContinente();
+                    if (contEscala == null) {
+                        continue;
+                    }
+
+                    if (mismo && contEscala != contOrigen) {
+                        // Escala fuera de continente en ruta local
+                        escalasFueraContinente += 2;
+                    } else if (!mismo && contEscala != contOrigen && contEscala != contDestino) {
+                        // Escala en tercer continente
+                        escalasFueraContinente += 1;
+                    }
+                }
+            }
+
             if (mismo) {
-                if (ruta.size() == 1) sameDirect++;
-                else if (ruta.size() == 2) sameOneStop++;
-                else inefficient++;
+                if (ruta.size() == 1)
+                    sameDirect++;
+                else if (ruta.size() == 2)
+                    sameOneStop++;
+                else
+                    inefficient++;
             } else {
-                if (ruta.size() == 1) diffDirect++;
-                else if (ruta.size() <= 2) diffOneStop++;
-                else inefficient++;
+                if (ruta.size() == 1)
+                    diffDirect++;
+                else if (ruta.size() <= 2)
+                    diffOneStop++;
+                else
+                    inefficient++;
             }
         }
 
-        double ef = sameDirect * 1.0 + sameOneStop * 0.8 + diffDirect * 1.2 + diffOneStop * 1.0 + inefficient * (-0.5);
+        // Calcular eficiencia base + penalización por escalas problemáticas
+        double ef = sameDirect * 1.0 + sameOneStop * 0.8 + diffDirect * 1.2 + diffOneStop * 1.0 +
+                inefficient * (-0.5) - escalasFueraContinente * 0.3;
         return ef;
     }
 
     private double calcularUtilizacionAlmacenes() {
         double total = 0.0;
-        for(Aeropuerto aeropuerto : aeropuertos) {
+        for (Aeropuerto aeropuerto : aeropuertos) {
             total += (double) aeropuerto.getCapacidadActual() / aeropuerto.getCapacidadMaxima();
         }
         return total;
     }
 
     private double calcularComplejidadRuteo(HashMap<Pedido, ArrayList<Vuelo>> mapaSolucion) {
-        if (mapaSolucion.isEmpty()) return 0.0;
+        if (mapaSolucion.isEmpty())
+            return 0.0;
         double total = 0.0;
         for (Map.Entry<Pedido, ArrayList<Vuelo>> e : mapaSolucion.entrySet()) {
             Pedido p = e.getKey();
             ArrayList<Vuelo> ruta = e.getValue();
-            if (ruta.isEmpty()) continue;
-            boolean mismo = obtenerAeropuerto(p.getAeropuertoOrigenCodigo()).getCiudad().getContinente() == obtenerAeropuerto(p.getAeropuertoDestinoCodigo()).getCiudad().getContinente();
+            if (ruta.isEmpty())
+                continue;
+            boolean mismo = obtenerAeropuerto(p.getAeropuertoOrigenCodigo()).getCiudad()
+                    .getContinente() == obtenerAeropuerto(p.getAeropuertoDestinoCodigo()).getCiudad().getContinente();
             int esperado = mismo ? 1 : 2;
-            if (ruta.size() > esperado) total += (ruta.size() - esperado) * 2.0;
+            if (ruta.size() > esperado)
+                total += (ruta.size() - esperado) * 2.0;
             if (ruta.size() > 1) {
                 for (Vuelo f : ruta) {
                     double util = (double) f.getCapacidadUsada() / f.getCapacidadMaxima();
-                    if (util < 0.3) total += 1.0;
+                    if (util < 0.3)
+                        total += 1.0;
                 }
             }
         }
@@ -2413,13 +2962,15 @@ public class ALNSSolver {
     }
 
     public boolean esSolucionValida() {
-        if (solucion.isEmpty()) return false;
+        if (solucion.isEmpty())
+            return false;
         HashMap<Pedido, ArrayList<Vuelo>> solucionActual = solucion.keySet().iterator().next();
 
         for (Map.Entry<Pedido, ArrayList<Vuelo>> e : solucionActual.entrySet()) {
             Pedido p = e.getKey();
             ArrayList<Vuelo> ruta = e.getValue();
-            if (!esRutaValida(p, ruta)) return false;
+            if (!esRutaValida(p, ruta))
+                return false;
         }
 
         if (!esSolucionTemporalValida(solucionActual)) {
@@ -2431,7 +2982,8 @@ public class ALNSSolver {
     }
 
     public boolean esSolucionCapacidadValida() {
-        if (solucion.isEmpty()) return false;
+        if (solucion.isEmpty())
+            return false;
         HashMap<Pedido, ArrayList<Vuelo>> solucionActual = solucion.keySet().iterator().next();
         Map<Vuelo, Integer> uso = new HashMap<>();
         for (Map.Entry<Pedido, ArrayList<Vuelo>> e : solucionActual.entrySet()) {
@@ -2439,10 +2991,12 @@ public class ALNSSolver {
             ArrayList<Vuelo> ruta = e.getValue();
             // OPTIMIZADO: Usar getCantidadProductosRapido()
             int productos = p.getCantidadProductosRapido();
-            for (Vuelo f : ruta) uso.merge(f, productos, Integer::sum);
+            for (Vuelo f : ruta)
+                uso.merge(f, productos, Integer::sum);
         }
         for (Map.Entry<Vuelo, Integer> e : uso.entrySet()) {
-            if (e.getValue() > e.getKey().getCapacidadMaxima()) return false;
+            if (e.getValue() > e.getKey().getCapacidadMaxima())
+                return false;
         }
         return true;
     }
@@ -2462,7 +3016,8 @@ public class ALNSSolver {
             // OPTIMIZADO: Usar getCantidadProductosRapido()
             int conteoProductos = pedido.getCantidadProductosRapido();
             totalProductosEnSistema += conteoProductos;
-            if (solucionActual.containsKey(pedido)) totalProductosAsignados += conteoProductos;
+            if (solucionActual.containsKey(pedido))
+                totalProductosAsignados += conteoProductos;
         }
 
         System.out.println("\n========== DESCRIPCIÓN DE LA SOLUCIÓN ==========");
@@ -2470,30 +3025,46 @@ public class ALNSSolver {
         System.out.println("Paquetes asignados: " + solucionActual.size() + "/" + pedidos.size());
         System.out.println("Productos transportados: " + totalProductosAsignados + "/" + totalProductosEnSistema);
 
-        int rutasDirectas = 0, rutasUnaEscala = 0, rutasDosEscalas = 0, rutasMismoContinente = 0, rutasDiferentesContinentes = 0, entregasATiempo = 0;
+        int rutasDirectas = 0, rutasUnaEscala = 0, rutasDosEscalas = 0, rutasMismoContinente = 0,
+                rutasDiferentesContinentes = 0, entregasATiempo = 0;
         for (Map.Entry<Pedido, ArrayList<Vuelo>> e : solucionActual.entrySet()) {
             Pedido p = e.getKey();
             ArrayList<Vuelo> ruta = e.getValue();
-            if (ruta.size() == 1) rutasDirectas++;
-            else if (ruta.size() == 2) rutasUnaEscala++;
-            else if (ruta.size() == 3) rutasDosEscalas++;
-            if (obtenerAeropuerto(p.getAeropuertoOrigenCodigo()).getCiudad().getContinente() == obtenerAeropuerto(p.getAeropuertoDestinoCodigo()).getCiudad().getContinente()) rutasMismoContinente++;
-            else rutasDiferentesContinentes++;
-            if (seRespetaDeadline(p, ruta)) entregasATiempo++;
+            if (ruta.size() == 1)
+                rutasDirectas++;
+            else if (ruta.size() == 2)
+                rutasUnaEscala++;
+            else if (ruta.size() == 3)
+                rutasDosEscalas++;
+            if (obtenerAeropuerto(p.getAeropuertoOrigenCodigo()).getCiudad()
+                    .getContinente() == obtenerAeropuerto(p.getAeropuertoDestinoCodigo()).getCiudad().getContinente())
+                rutasMismoContinente++;
+            else
+                rutasDiferentesContinentes++;
+            if (seRespetaDeadline(p, ruta))
+                entregasATiempo++;
         }
 
         System.out.println("\n----- Estadísticas de Rutas -----");
-        System.out.println("Rutas directas: " + rutasDirectas + " (" + formatearPorcentaje(rutasDirectas, solucionActual.size()) + "%)");
-        System.out.println("Rutas con 1 escala: " + rutasUnaEscala + " (" + formatearPorcentaje(rutasUnaEscala, solucionActual.size()) + "%)");
-        System.out.println("Rutas con 2 escalas: " + rutasDosEscalas + " (" + formatearPorcentaje(rutasDosEscalas, solucionActual.size()) + "%)");
-        System.out.println("Rutas en mismo continente: " + rutasMismoContinente + " (" + formatearPorcentaje(rutasMismoContinente, solucionActual.size()) + "%)");
-        System.out.println("Rutas entre continentes: " + rutasDiferentesContinentes + " (" + formatearPorcentaje(rutasDiferentesContinentes, solucionActual.size()) + "%)");
-        System.out.println("Entregas a tiempo: " + entregasATiempo + " (" + formatearPorcentaje(entregasATiempo, solucionActual.size()) + "% de asignados)");
-        System.out.println("Entregas a tiempo del total: " + entregasATiempo + "/" + pedidos.size() + " (" + formatearPorcentaje(entregasATiempo, pedidos.size()) + "%)");
+        System.out.println("Rutas directas: " + rutasDirectas + " ("
+                + formatearPorcentaje(rutasDirectas, solucionActual.size()) + "%)");
+        System.out.println("Rutas con 1 escala: " + rutasUnaEscala + " ("
+                + formatearPorcentaje(rutasUnaEscala, solucionActual.size()) + "%)");
+        System.out.println("Rutas con 2 escalas: " + rutasDosEscalas + " ("
+                + formatearPorcentaje(rutasDosEscalas, solucionActual.size()) + "%)");
+        System.out.println("Rutas en mismo continente: " + rutasMismoContinente + " ("
+                + formatearPorcentaje(rutasMismoContinente, solucionActual.size()) + "%)");
+        System.out.println("Rutas entre continentes: " + rutasDiferentesContinentes + " ("
+                + formatearPorcentaje(rutasDiferentesContinentes, solucionActual.size()) + "%)");
+        System.out.println("Entregas a tiempo: " + entregasATiempo + " ("
+                + formatearPorcentaje(entregasATiempo, solucionActual.size()) + "% de asignados)");
+        System.out.println("Entregas a tiempo del total: " + entregasATiempo + "/" + pedidos.size() + " ("
+                + formatearPorcentaje(entregasATiempo, pedidos.size()) + "%)");
 
         int paquetesNoAsignados = pedidos.size() - solucionActual.size();
         if (paquetesNoAsignados > 0) {
-            System.out.println("Paquetes no asignados: " + paquetesNoAsignados + "/" + pedidos.size() + " (" + formatearPorcentaje(paquetesNoAsignados, pedidos.size()) + "%)");
+            System.out.println("Paquetes no asignados: " + paquetesNoAsignados + "/" + pedidos.size() + " ("
+                    + formatearPorcentaje(paquetesNoAsignados, pedidos.size()) + "%)");
             System.out.println("Razón principal: Capacidad de almacenes insuficiente");
         }
 
@@ -2501,17 +3072,18 @@ public class ALNSSolver {
         reconstruirCapacidadesDesdeSolucion(solucionActual);
         reconstruirAlmacenesDesdeSolucion(solucionActual);
         int totalCapacidad = 0, totalOcupacion = 0, almacenesAlMax = 0;
-        for(Aeropuerto aeropuerto : aeropuertos) {
+        for (Aeropuerto aeropuerto : aeropuertos) {
             int max = aeropuerto.getCapacidadMaxima();
             totalCapacidad += max;
             totalOcupacion += aeropuerto.getCapacidadActual();
-            if (aeropuerto.getCapacidadActual() >= max) almacenesAlMax++;
+            if (aeropuerto.getCapacidadActual() >= max)
+                almacenesAlMax++;
             double porcentaje = (aeropuerto.getCapacidadActual() * 100.0) / max;
-            //if (porcentaje > 80.0) {
-                System.out.println("  " + aeropuerto.getCiudad().getNombre() + " - " + aeropuerto.getCodigoIATA()
-                        + " : " + aeropuerto.getCapacidadActual()
-                        + "/" + max + " (" + String.format("%.1f", porcentaje) + "%)");
-            //}
+            // if (porcentaje > 80.0) {
+            System.out.println("  " + aeropuerto.getCiudad().getNombre() + " - " + aeropuerto.getCodigoIATA()
+                    + " : " + aeropuerto.getCapacidadActual()
+                    + "/" + max + " (" + String.format("%.1f", porcentaje) + "%)");
+            // }
         }
 
         double avgPorcentaje = totalCapacidad > 0 ? (totalOcupacion * 100.0) / totalCapacidad : 0.0;
@@ -2531,22 +3103,24 @@ public class ALNSSolver {
                         double pct = (maxOcc * 100.0) / aeropuerto.getCapacidadMaxima();
                         if (pct > 50.0) {
                             System.out.println("  " + aeropuerto.getCiudad().getNombre() +
-                                              " - Pico: " + maxOcc + "/" + aeropuerto.getCapacidadMaxima() +
-                                              " (" + String.format("%.1f", pct) + "%) a las " +
-                                              String.format("%02d:%02d", hora, min));
+                                    " - Pico: " + maxOcc + "/" + aeropuerto.getCapacidadMaxima() +
+                                    " (" + String.format("%.1f", pct) + "%) a las " +
+                                    String.format("%02d:%02d", hora, min));
                         }
                     }
                 }
             }
         }
 
-        if (nivelDetalle < 2) return;
+        if (nivelDetalle < 2)
+            return;
 
         System.out.println("\n----- Rutas por Prioridad -----");
         List<Pedido> ordenados = new ArrayList<>(solucionActual.keySet());
         ordenados.sort((p1, p2) -> {
             int cmp = Double.compare(p2.getPrioridad(), p1.getPrioridad());
-            if (cmp != 0) return cmp;
+            if (cmp != 0)
+                return cmp;
             return p1.getFechaLimiteEntrega().compareTo(p2.getFechaLimiteEntrega());
         });
 
@@ -2557,13 +3131,14 @@ public class ALNSSolver {
             ArrayList<Vuelo> ruta = solucionActual.get(p);
 
             System.out.println("\nPedido #" + p.getId() +
-                              " (Prioridad: " + String.format("%.2f", p.getPrioridad()) +
-                              ", Deadline: " + p.getFechaLimiteEntrega() + ")");
+                    " (Prioridad: " + String.format("%.2f", p.getPrioridad()) +
+                    ", Deadline: " + p.getFechaLimiteEntrega() + ")");
 
             System.out.println("  Origen: " + obtenerAeropuerto(p.getAeropuertoOrigenCodigo()).getCiudad().getNombre() +
-                              " (" + obtenerAeropuerto(p.getAeropuertoOrigenCodigo()).getCiudad().getContinente() + ")");
-            System.out.println("  Destino: " + obtenerAeropuerto(p.getAeropuertoDestinoCodigo()).getCiudad().getNombre() +
-                              " (" + obtenerAeropuerto(p.getAeropuertoDestinoCodigo()).getCiudad().getContinente() + ")");
+                    " (" + obtenerAeropuerto(p.getAeropuertoOrigenCodigo()).getCiudad().getContinente() + ")");
+            System.out
+                    .println("  Destino: " + obtenerAeropuerto(p.getAeropuertoDestinoCodigo()).getCiudad().getNombre() +
+                            " (" + obtenerAeropuerto(p.getAeropuertoDestinoCodigo()).getCiudad().getContinente() + ")");
 
             if (ruta.isEmpty()) {
                 System.out.println("  Ruta: Ya está en el destino");
@@ -2575,14 +3150,15 @@ public class ALNSSolver {
             for (int j = 0; j < ruta.size(); j++) {
                 Vuelo v = ruta.get(j);
                 tiempoTotal += v.getTiempoTransporte();
-                System.out.println("    " + (j+1) + ". " +
-                                  v.getAeropuertoOrigen().getCiudad().getNombre() + " → " +
-                                  v.getAeropuertoDestino().getCiudad().getNombre() +
-                                  " (" + String.format("%.1f", v.getTiempoTransporte()) + "h, " +
-                                  v.getCapacidadUsada() + "/" + v.getCapacidadMaxima() + " pedidos)");
+                System.out.println("    " + (j + 1) + ". " +
+                        v.getAeropuertoOrigen().getCiudad().getNombre() + " → " +
+                        v.getAeropuertoDestino().getCiudad().getNombre() +
+                        " (" + String.format("%.1f", v.getTiempoTransporte()) + "h, " +
+                        v.getCapacidadUsada() + "/" + v.getCapacidadMaxima() + " pedidos)");
             }
 
-            if (ruta.size() > 1) tiempoTotal += (ruta.size() - 1) * 2.0;
+            if (ruta.size() > 1)
+                tiempoTotal += (ruta.size() - 1) * 2.0;
 
             System.out.println("  Tiempo total estimado: " + String.format("%.1f", tiempoTotal) + "h");
 
@@ -2591,14 +3167,16 @@ public class ALNSSolver {
         }
 
         if (mostrar < ordenados.size()) {
-            System.out.println("\n... y " + (ordenados.size() - mostrar) + " pedidos más (use nivel de detalle 3 para ver todos)");
+            System.out.println(
+                    "\n... y " + (ordenados.size() - mostrar) + " pedidos más (use nivel de detalle 3 para ver todos)");
         }
 
         System.out.println("\n=================================================");
     }
 
     private String formatearPorcentaje(int valor, int total) {
-        if (total == 0) return "0.0";
+        if (total == 0)
+            return "0.0";
         return String.format("%.1f", (valor * 100.0) / total);
     }
 
@@ -2634,7 +3212,8 @@ public class ALNSSolver {
             // OPTIMIZADO: Usar getCantidadProductosRapido()
             int conteoProductos = pedido.getCantidadProductosRapido();
             int inicio = obtenerTiempoInicioPaquete(pedido);
-            return agregarOcupacionTemporal(destino, inicio, Constantes.HORAS_MAX_RECOGIDA_CLIENTE * 60, conteoProductos);
+            return agregarOcupacionTemporal(destino, inicio, Constantes.HORAS_MAX_RECOGIDA_CLIENTE * 60,
+                    conteoProductos);
         }
 
         int minutoActual = obtenerTiempoInicioPaquete(pedido);
@@ -2649,33 +3228,39 @@ public class ALNSSolver {
             int tiempoEspera = 120;
             if (!agregarOcupacionTemporal(salida, minutoActual, tiempoEspera, conteoProductos)) {
                 System.out.println("Violación de capacidad en " + salida.getCiudad().getNombre() +
-                                  " en minuto " + minutoActual + " (fase de espera) para pedido " + pedido.getId());
+                        " en minuto " + minutoActual + " (fase de espera) para pedido " + pedido.getId());
                 return false;
             }
 
             int inicioVuelo = minutoActual + tiempoEspera;
-            int duracionVuelo = (int)(vuelo.getTiempoTransporte() * 60);
+            int duracionVuelo = (int) (vuelo.getTiempoTransporte() * 60);
             int minutoLlegada = inicioVuelo + duracionVuelo;
 
             int duracionEstancia;
-            if (i < ruta.size() - 1) duracionEstancia = 120;
-            else duracionEstancia = Constantes.HORAS_MAX_RECOGIDA_CLIENTE * 60;
+            if (i < ruta.size() - 1)
+                duracionEstancia = 120;
+            else
+                duracionEstancia = Constantes.HORAS_MAX_RECOGIDA_CLIENTE * 60;
 
-            if (duracionEstancia > 0 && !agregarOcupacionTemporal(llegada, minutoLlegada, duracionEstancia, conteoProductos)) {
+            if (duracionEstancia > 0
+                    && !agregarOcupacionTemporal(llegada, minutoLlegada, duracionEstancia, conteoProductos)) {
                 System.out.println("Violación de capacidad en " + llegada.getCiudad().getNombre() +
-                                  " en minuto " + minutoLlegada + " (fase de llegada) para pedido " + pedido.getId());
+                        " en minuto " + minutoLlegada + " (fase de llegada) para pedido " + pedido.getId());
                 return false;
             }
 
             minutoActual = minutoLlegada;
-            if (i < ruta.size() - 1) minutoActual += 120;
+            if (i < ruta.size() - 1)
+                minutoActual += 120;
         }
 
         return true;
     }
 
-    private boolean agregarOcupacionTemporal(Aeropuerto aeropuerto, int minutoInicio, int duracionMinutos, int conteoProductos) {
-        if (aeropuerto == null) return false;
+    private boolean agregarOcupacionTemporal(Aeropuerto aeropuerto, int minutoInicio, int duracionMinutos,
+            int conteoProductos) {
+        if (aeropuerto == null)
+            return false;
         int[] array = ocupacionTemporalAlmacenes.get(aeropuerto);
         int capacidadMaxima = aeropuerto.getCapacidadMaxima();
         final int TOTAL_MINUTOS = HORIZON_DAYS * 24 * 60;
@@ -2683,19 +3268,24 @@ public class ALNSSolver {
         int finClamp = Math.max(0, Math.min(minutoInicio + duracionMinutos, TOTAL_MINUTOS));
         for (int m = inicioClamp; m < finClamp; m++) {
             array[m] += conteoProductos;
-            if (array[m] > capacidadMaxima) return false;
+            if (array[m] > capacidadMaxima)
+                return false;
         }
         return true;
     }
 
     private int[] findPeakOccupancy(Aeropuerto aeropuerto) {
         int[] array = ocupacionTemporalAlmacenes.get(aeropuerto);
-        int max = 0; int minuto = 0;
+        int max = 0;
+        int minuto = 0;
         final int TOTAL_MINUTOS = HORIZON_DAYS * 24 * 60;
         for (int m = 0; m < TOTAL_MINUTOS; m++) {
-            if (array[m] > max) { max = array[m]; minuto = m; }
+            if (array[m] > max) {
+                max = array[m];
+                minuto = m;
+            }
         }
-        return new int[]{minuto, max};
+        return new int[] { minuto, max };
     }
 
     /**
@@ -2708,21 +3298,23 @@ public class ALNSSolver {
         if (codigoIATA == null || codigoIATA.trim().isEmpty()) {
             return null;
         }
-        
+
         // OPTIMIZACIÓN: Lookup O(1) desde cache
         Aeropuerto aeropuerto = cacheCodigoIATAAeropuerto.get(codigoIATA.trim().toUpperCase());
-        
+
         if (aeropuerto == null && Constantes.LOGGING_VERBOSO) {
             System.err.println("❌ No se encontró aeropuerto con código IATA: '" + codigoIATA + "'");
         }
-        
+
         return aeropuerto;
     }
 
-    // ==================== GETTERS PÚBLICOS PARA ACCEDER A LA SOLUCIÓN ====================
+    // ==================== GETTERS PÚBLICOS PARA ACCEDER A LA SOLUCIÓN
+    // ====================
 
     /**
      * Obtiene la mejor solución encontrada por el algoritmo ALNS
+     * 
      * @return HashMap con la solución: Pedido -> Lista de Vuelos asignados
      */
     public HashMap<Pedido, ArrayList<Vuelo>> getMejorSolucion() {
@@ -2736,6 +3328,7 @@ public class ALNSSolver {
 
     /**
      * Obtiene el peso (fitness) de la mejor solución
+     * 
      * @return Peso de la solución (mayor es mejor)
      */
     public Integer getPesoMejorSolucion() {
@@ -2745,16 +3338,11 @@ public class ALNSSolver {
         return mejorSolucion.values().iterator().next();
     }
 
-    /**
-     * Obtiene el tiempo inicial de referencia (T0) usado en la simulación
-     * @return LocalDateTime con el tiempo T0
-     */
-    public LocalDateTime getT0() {
-        return this.T0;
-    }
+    // NOTA: getT0() ya está definido arriba después de inicializarT0()
 
     /**
      * Obtiene la lista de pedidos originales
+     * 
      * @return Lista de pedidos
      */
     public List<Pedido> getPedidosOriginales() {
@@ -2763,6 +3351,7 @@ public class ALNSSolver {
 
     /**
      * Obtiene la lista de pedidos procesados (potencialmente unitizados)
+     * 
      * @return Lista de pedidos
      */
     public List<Pedido> getPedidos() {
@@ -2771,73 +3360,79 @@ public class ALNSSolver {
 
     /**
      * Obtiene los pedidos que no fueron asignados en la solución
+     * 
      * @return Lista de pedidos no asignados
      */
     public ArrayList<Pedido> getPedidosNoAsignados() {
         HashMap<Pedido, ArrayList<Vuelo>> solucion = getMejorSolucion();
         ArrayList<Pedido> noAsignados = new ArrayList<>();
-        
+
         for (Pedido pedido : this.pedidos) {
             if (!solucion.containsKey(pedido)) {
                 noAsignados.add(pedido);
             }
         }
-        
+
         return noAsignados;
     }
-    //METODO PARA AGREGAR AEROPUERTOS ORIGEN
-    private void asignarAeropuertosOrigen(){
-        for(Pedido pedido : pedidos){
+
+    // METODO PARA AGREGAR AEROPUERTOS ORIGEN
+    private void asignarAeropuertosOrigen() {
+        for (Pedido pedido : pedidos) {
             pedido.setAeropuertoOrigenCodigo(colocarAeropuertoPrincipalAleatorio(pedido.getAeropuertoDestinoCodigo()));
         }
-//        // A) Completar en pedidosOriginales
-//        for (Pedido p : pedidosOriginales) {
-//            if (p.getAeropuertoOrigenCodigo() == null || p.getAeropuertoOrigenCodigo().isBlank()) {
-//                p.setAeropuertoOrigenCodigo(colocarAeropuertoPrincipalAleatorio(p.getAeropuertoDestinoCodigo()));
-//            }
-//        }
-//        // B) Completar en pedidos (las unidades creadas en DataLoader)
-//        for (Pedido p : pedidos) {
-//            if (p.getAeropuertoOrigenCodigo() == null || p.getAeropuertoOrigenCodigo().isBlank()) {
-//                p.setAeropuertoOrigenCodigo(colocarAeropuertoPrincipalAleatorio(p.getAeropuertoDestinoCodigo()));
-//            }
-//        }
+        // // A) Completar en pedidosOriginales
+        // for (Pedido p : pedidosOriginales) {
+        // if (p.getAeropuertoOrigenCodigo() == null ||
+        // p.getAeropuertoOrigenCodigo().isBlank()) {
+        // p.setAeropuertoOrigenCodigo(colocarAeropuertoPrincipalAleatorio(p.getAeropuertoDestinoCodigo()));
+        // }
+        // }
+        // // B) Completar en pedidos (las unidades creadas en DataLoader)
+        // for (Pedido p : pedidos) {
+        // if (p.getAeropuertoOrigenCodigo() == null ||
+        // p.getAeropuertoOrigenCodigo().isBlank()) {
+        // p.setAeropuertoOrigenCodigo(colocarAeropuertoPrincipalAleatorio(p.getAeropuertoDestinoCodigo()));
+        // }
+        // }
     }
+
     // Método auxiliar para encontrar aeropuerto por defecto
     private String colocarAeropuertoPrincipalAleatorio(String codigoDestino) {
         // Lista de códigos IATA de los aeropuertos principales de MoraPack
-        String[] aeropuertosPrincipales = {"SPIM", "UBBB", "EBCI"};
+        String[] aeropuertosPrincipales = { "SPIM", "UBBB", "EBCI" };
         ArrayList<String> aeropuertos = new ArrayList<>();
 
         Random random = new Random();
         for (int i = 0; i < 3; i++) {
-            if(Objects.equals(codigoDestino, aeropuertosPrincipales[i]))
+            if (Objects.equals(codigoDestino, aeropuertosPrincipales[i]))
                 continue;
             aeropuertos.add(aeropuertosPrincipales[i]);
         }
         int indiceAleatorio = random.nextInt(aeropuertos.size());
         String codigoIATAOrigen = aeropuertos.get(indiceAleatorio);
-        //System.out.println("🔀 Usando aeropuerto por defecto: " + codigoIATAOrigen);
+        // System.out.println("🔀 Usando aeropuerto por defecto: " + codigoIATAOrigen);
         return codigoIATAOrigen;
     }
-    
+
     /**
      * Obtiene la solución a nivel de producto.
      * Convierte la solución interna (Pedido -> Rutas) a formato producto-level.
      * Siguiendo patrón de MoraPack-Backend.
      * 
-     * @return Map<Producto, ArrayList<Vuelo>> con la ruta de cada producto individual
+     * @return Map<Producto, ArrayList<Vuelo>> con la ruta de cada producto
+     *         individual
      */
     public Map<Producto, ArrayList<Vuelo>> obtenerSolucionNivelProducto() {
         Map<Producto, ArrayList<Vuelo>> solucionProductos = new HashMap<>();
-        
+
         // Convertir desde la mejor solución de pedidos a productos
         if (mejorSolucion != null && !mejorSolucion.isEmpty()) {
             for (HashMap<Pedido, ArrayList<Vuelo>> rutasPedidos : mejorSolucion.keySet()) {
                 for (Map.Entry<Pedido, ArrayList<Vuelo>> entry : rutasPedidos.entrySet()) {
                     Pedido pedido = entry.getKey();
                     ArrayList<Vuelo> ruta = entry.getValue();
-                    
+
                     // Si el pedido tiene productos, asignar la misma ruta a cada uno
                     if (pedido.getProductos() != null && !pedido.getProductos().isEmpty()) {
                         for (Producto producto : pedido.getProductos()) {
@@ -2854,7 +3449,7 @@ public class ALNSSolver {
                 }
             }
         }
-        
+
         return solucionProductos;
     }
     
@@ -3028,5 +3623,17 @@ public class ALNSSolver {
             .filter(p -> pedidoId.equals(p.getId()))
             .findFirst()
             .orElse(null);
+    }
+    /**
+     * NUEVO: Obtiene la solución a nivel de producto CON tiempos absolutos.
+     * Esta versión incluye fechas de salida/llegada calculadas por el ALNS.
+     * 
+     * @return Map<Producto, RutaConTiempos> con rutas y tiempos calculados
+     */
+    public Map<Producto, RutaConTiempos> obtenerSolucionConTiempos() {
+        if (productTracker == null) {
+            return new HashMap<>();
+        }
+        return productTracker.getSolucionConTiempos();
     }
 }

@@ -1,6 +1,8 @@
 package com.grupo5e.morapack.controller;
 
 import com.grupo5e.morapack.algorithm.alns.ALNSSolver;
+import com.grupo5e.morapack.algorithm.alns.RutaConTiempos;
+import com.grupo5e.morapack.algorithm.alns.TramoConTiempo;
 import com.grupo5e.morapack.api.dto.*;
 import com.grupo5e.morapack.core.model.Pedido;
 import com.grupo5e.morapack.core.model.Producto;
@@ -26,8 +28,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * Controller para ejecución del algoritmo ALNS.
- * Siguiendo patrón 100% de MoraPack-Backend: ejecuta y retorna resultados inmediatamente.
+ * Controller para ejecución del algoritmo ALNS. *
  * NO persiste en base de datos, todo en memoria.
  */
 @RestController
@@ -928,4 +929,3 @@ public class AlgoritmoController {
                 .build();
     }
 }
-

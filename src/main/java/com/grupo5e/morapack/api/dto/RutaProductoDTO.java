@@ -63,5 +63,6 @@ public class RutaProductoDTO {
     @Schema(description = "Fecha y hora de llegada del primer vuelo del producto")
     private LocalDateTime horaLlegada;
 
+    private LocalDateTime fechaPedido;
 }
 

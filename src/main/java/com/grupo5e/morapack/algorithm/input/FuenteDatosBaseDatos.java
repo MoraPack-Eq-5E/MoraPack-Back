@@ -211,6 +211,10 @@ public class FuenteDatosBaseDatos implements FuenteDatosInput {
             LocalDateTime horaInicio,
             LocalDateTime horaFin,
             int tipoData) {
+        if(tipoData == 1){
+            horaFin = horaInicio;
+            horaInicio = horaFin.minusDays(1);
+        }
         try {
             System.out.println("========================================");
             System.out.println("CARGANDO PEDIDOS CON VENTANA DE TIEMPO (OPTIMIZADO)");

@@ -36,7 +36,7 @@ public class ALNSSolver {
     private List<Pedido> pedidos;
 
     // Unitización - DESACTIVADA para evitar problemas con IDs en BD
-    private static final boolean HABILITAR_UNITIZACION_PRODUCTO = false;
+    private static final boolean HABILITAR_UNITIZACION_PRODUCTO = true;
     private ArrayList<Pedido> pedidosOriginales;
     
     // ProductTracker - Mapeo directo Producto → Ruta (versión simplificada)

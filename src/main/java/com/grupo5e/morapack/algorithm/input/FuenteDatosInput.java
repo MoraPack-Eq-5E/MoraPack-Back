@@ -62,13 +62,18 @@ public interface FuenteDatosInput {
             LocalDateTime horaInicio,
             LocalDateTime horaFin,
             int tipoData) {
-        // Implementación por defecto: cargar todos y filtrar
+        if(tipoData == 1){
+            horaFin = horaInicio;
+            horaInicio = horaFin.minusDays(1);
+        }
+        LocalDateTime finalHoraInicio = horaInicio;
+        LocalDateTime finalHoraFin = horaFin;
         return cargarPedidos(aeropuertos).stream()
                 .filter(p -> {
                     LocalDateTime fechaPedido = p.getFechaPedido();
                     return fechaPedido != null &&
-                           !fechaPedido.isBefore(horaInicio) &&
-                           !fechaPedido.isAfter(horaFin);
+                            !fechaPedido.isBefore(finalHoraInicio) &&
+                            !fechaPedido.isAfter(finalHoraFin);
                 })
                 .toList();
     }

@@ -108,9 +108,10 @@ public class AlgoritmoController {
             Map<Producto, ArrayList<Vuelo>> solucionProductos = solver.obtenerSolucionNivelProducto();
             
             // 4. Convertir a DTO
+            LocalDateTime inicioTimeline = horaInicioSimulacion != null ? horaInicioSimulacion : horaInicio;
             ResultadoAlgoritmoDTO resultado = convertirSolucionAResultado(
                 solucionProductos, 
-                horaInicio, 
+                inicioTimeline,
                 horaFin, 
                 segundosEjecucion
             );
@@ -167,6 +168,8 @@ public class AlgoritmoController {
                     producto.getPedido().getAeropuertoOrigenCodigo() : null)
                 .codigoDestino(producto.getPedido() != null ? 
                     producto.getPedido().getAeropuertoDestinoCodigo() : null)
+                .fechaPedido(producto.getPedido() != null ? 
+                    producto.getPedido().getFechaPedido() : null) // ✅ NUEVA LÍNEA
                 .vuelos(convertirVuelosADTO(vuelos))
                 .cantidadVuelos(vuelos.size())
                 .tiempoTotalHoras(calcularTiempoTotal(vuelos))
@@ -469,7 +472,10 @@ public class AlgoritmoController {
         
         // Primer paso: Agrupar vuelos por ruta y tiempo
         for (RutaProductoDTO rutaProducto : rutasProductos) {
-            LocalDateTime tiempoActualProducto = horaInicio;
+            // ✅ CORRECCIÓN: Usar fechaPedido en lugar de horaInicio
+            LocalDateTime tiempoActualProducto = rutaProducto.getFechaPedido() != null ? 
+                rutaProducto.getFechaPedido() : horaInicio;
+            
             
             for (int i = 0; i < rutaProducto.getVuelos().size(); i++) {
                 VueloSimpleDTO vuelo = rutaProducto.getVuelos().get(i);
@@ -496,11 +502,24 @@ public class AlgoritmoController {
                         horaSalidaVuelo = horaSalidaVuelo.plusDays(1);
                     }
                     
-                    // Calcular hora de llegada (puede cruzar medianoche)
-                    horaLlegadaVuelo = horaSalidaVuelo.toLocalDate()
-                        .atTime(vuelo.getHoraLlegada());
-                    if (vuelo.getHoraLlegada().isBefore(vuelo.getHoraSalida())) {
-                        horaLlegadaVuelo = horaLlegadaVuelo.plusDays(1);
+                    // ✅ CORRECCIÓN: Calcular llegada usando tiempoTransporte real
+                    if (vuelo.getTiempoTransporte() != null && vuelo.getTiempoTransporte() > 0) {
+                        // tiempoTransporte está en HORAS
+                        long minutosTransporte = (long) (vuelo.getTiempoTransporte() * 60);
+                        horaLlegadaVuelo = horaSalidaVuelo.plusMinutes(minutosTransporte);
+                        
+                        // ⚠️ ADVERTENCIA: Detectar vuelos anormalmente largos
+                        if (vuelo.getTiempoTransporte() > 48) {
+                            log.warn("⚠️ VUELO SOSPECHOSO: {} → {} dura {} horas (¿debería ser días?)", 
+                                vuelo.getCodigoOrigen(), vuelo.getCodigoDestino(), vuelo.getTiempoTransporte());
+                        }
+                    } else {
+                        // Fallback: usar horarios programados (solo para vuelos de mismo día)
+                        horaLlegadaVuelo = horaSalidaVuelo.toLocalDate()
+                            .atTime(vuelo.getHoraLlegada());
+                        if (vuelo.getHoraLlegada().isBefore(vuelo.getHoraSalida())) {
+                            horaLlegadaVuelo = horaLlegadaVuelo.plusDays(1);
+                        }
                     }
                 } else {
                     // Fallback: usar tiempo de transporte

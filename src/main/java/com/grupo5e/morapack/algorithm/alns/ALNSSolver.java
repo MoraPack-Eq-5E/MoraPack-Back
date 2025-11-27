@@ -42,6 +42,10 @@ public class ALNSSolver {
     // ProductTracker - Mapeo directo Producto → Ruta (versión simplificada)
     private ProductTracker productTracker;
 
+    // Ventana de simulación (para cálculo dinámico del horizonte)
+    private LocalDateTime horaInicioSimulacion;
+    private LocalDateTime horaFinSimulacion;
+    
     // Ancla temporal T0
     private LocalDateTime T0;
     // Ocupación de almacenes
@@ -89,9 +93,26 @@ public class ALNSSolver {
     // CRÍTICO: RouteValidator para validación optimizada (Backend pattern)
     private RouteValidator routeValidator;
 
-    // Horizon days
-    private static final int HORIZON_DAYS = 4;
+    // Horizon days (DEPRECATED - ahora se calcula dinámicamente)
+    private static final int HORIZON_DAYS = 4; // Solo para backward compatibility
     private static final boolean DEBUG_MODE = false;
+    
+    /**
+     * Calcula el horizonte temporal en minutos basándose en la ventana de simulación.
+     * Si horaInicioSimulacion y horaFinSimulacion están definidas, usa esa ventana.
+     * Si no, usa el valor por defecto de HORIZON_DAYS * 24 * 60.
+     */
+    private int calcularHorizonteMinutos() {
+        if (horaInicioSimulacion != null && horaFinSimulacion != null) {
+            long minutos = java.time.temporal.ChronoUnit.MINUTES.between(
+                horaInicioSimulacion, horaFinSimulacion
+            );
+            // Agregar un pequeño buffer (10%) para cubrir tiempos de tránsito finales
+            return (int) (minutos * 1.1);
+        }
+        // Fallback al valor por defecto
+        return HORIZON_DAYS * 24 * 60;
+    }
 
     /**
      * Constructor principal simplificado que usa FuenteDatosInput modular.
@@ -112,11 +133,17 @@ public class ALNSSolver {
      * @param horaFin Hora de fin de la ventana de simulación (opcional)
      */
     public ALNSSolver(int maxIteraciones, LocalDateTime horaInicio, LocalDateTime horaFin) {
+        // CRÍTICO: Guardar ventana de simulación para cálculo dinámico del horizonte
+        this.horaInicioSimulacion = horaInicio;
+        this.horaFinSimulacion = horaFin;
+        
         System.out.println("========================================");
         System.out.println("INICIALIZANDO ALNS SOLVER");
         if (horaInicio != null && horaFin != null) {
             System.out.println("MODO: Ventana de tiempo especificada");
             System.out.println("Ventana: " + horaInicio + " a " + horaFin);
+            long dias = java.time.temporal.ChronoUnit.DAYS.between(horaInicio, horaFin);
+            System.out.println("Duración: " + dias + " días (" + calcularHorizonteMinutos() + " minutos con buffer)");
         } else {
             System.out.println("MODO: Todos los pedidos (sin filtrado de tiempo)");
         }
@@ -1577,7 +1604,7 @@ public class ALNSSolver {
         long minutosDesdeT0 = ChronoUnit.MINUTES.between(T0, pedido.getFechaPedido());
         int offset = Math.floorMod(pedido.getId(), 60);
         int minutoInicio = (int) (minutosDesdeT0 + offset);
-        final int TOTAL_MINUTOS = HORIZON_DAYS * 24 * 60;
+        final int TOTAL_MINUTOS = calcularHorizonteMinutos(); // ✅ Dinámico
         return Math.max(0, Math.min(minutoInicio, TOTAL_MINUTOS - 1));
     }
 
@@ -2610,7 +2637,7 @@ public class ALNSSolver {
     }
 
     private void inicializarOcupacionTemporalAlmacenes() {
-        final int TOTAL_MINUTOS = HORIZON_DAYS * 24 * 60;
+        final int TOTAL_MINUTOS = calcularHorizonteMinutos(); // ✅ Dinámico
         for (Aeropuerto aeropuerto : aeropuertos) {
             ocupacionTemporalAlmacenes.put(aeropuerto, new int[TOTAL_MINUTOS]);
         }
@@ -2678,7 +2705,7 @@ public class ALNSSolver {
         if (aeropuerto == null) return false;
         int[] array = ocupacionTemporalAlmacenes.get(aeropuerto);
         int capacidadMaxima = aeropuerto.getCapacidadMaxima();
-        final int TOTAL_MINUTOS = HORIZON_DAYS * 24 * 60;
+        final int TOTAL_MINUTOS = calcularHorizonteMinutos(); // ✅ Dinámico
         int inicioClamp = Math.max(0, Math.min(minutoInicio, TOTAL_MINUTOS - 1));
         int finClamp = Math.max(0, Math.min(minutoInicio + duracionMinutos, TOTAL_MINUTOS));
         for (int m = inicioClamp; m < finClamp; m++) {
@@ -2691,7 +2718,7 @@ public class ALNSSolver {
     private int[] findPeakOccupancy(Aeropuerto aeropuerto) {
         int[] array = ocupacionTemporalAlmacenes.get(aeropuerto);
         int max = 0; int minuto = 0;
-        final int TOTAL_MINUTOS = HORIZON_DAYS * 24 * 60;
+        final int TOTAL_MINUTOS = calcularHorizonteMinutos(); // ✅ Dinámico
         for (int m = 0; m < TOTAL_MINUTOS; m++) {
             if (array[m] > max) { max = array[m]; minuto = m; }
         }

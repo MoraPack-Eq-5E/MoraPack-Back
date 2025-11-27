@@ -42,6 +42,9 @@ public class RutaProductoDTO {
     @Schema(description = "Código IATA del aeropuerto de destino", example = "EDDI")
     private String codigoDestino;
     
+    @Schema(description = "Fecha y hora en que se realizó el pedido", example = "2025-01-05T08:30:00")
+    private java.time.LocalDateTime fechaPedido;
+    
     @Schema(description = "Secuencia de vuelos asignados a este producto")
     private List<VueloSimpleDTO> vuelos;
     

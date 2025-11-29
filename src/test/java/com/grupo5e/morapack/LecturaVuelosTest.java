@@ -34,7 +34,7 @@ public class LecturaVuelosTest {
         Assertions.assertNotNull(vueloEjemplo.getHoraLlegada(), "La hora de llegada no debe ser nula");
 
         // Validar el estado inicial
-        Assertions.assertEquals("CONFIRMADO", vueloEjemplo.getEstado().name(), "El estado inicial debe ser CONFIRMADO");
+        Assertions.assertEquals("DISPONIBLE", vueloEjemplo.getEstado().name(), "El estado inicial debe ser DISPONIBLE");
 
         System.out.println("✅ Test exitoso: vuelos cargados = " + vuelos.size());
     }

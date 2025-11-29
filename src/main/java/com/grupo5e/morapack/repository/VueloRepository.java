@@ -26,7 +26,7 @@ public interface VueloRepository extends JpaRepository<Vuelo, Integer> {
     int contarTipoDataCero();
 
     @Query(
-            value = "SELECT * FROM vuelos WHERE tipo_data = :tipoData",
+            value = "SELECT * FROM vuelos WHERE tipo_data = :tipoData AND estado = 'DISPONIBLE'",
             nativeQuery = true
     )
     List<Vuelo> listarPorTipoData(@Param("tipoData") int tipoData);

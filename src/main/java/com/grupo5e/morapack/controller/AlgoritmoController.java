@@ -61,6 +61,8 @@ public class AlgoritmoController {
     public ResponseEntity<ResultadoAlgoritmoDTO> ejecutarAlgoritmo(
             @RequestBody(required = false) AlnsRequestDTO solicitud,int tipoData) {
 
+            /*@RequestBody(required = false) AlnsRequestDTO solicitud,int tipoData, boolean esSemanal) {*///JESUS 
+        
         LocalDateTime horaInicio = LocalDateTime.now();
         log.info("🚀 Ejecutando algoritmo ALNS (sincrónico) - Inicio: {}", horaInicio);
 
@@ -134,6 +136,22 @@ public class AlgoritmoController {
                     segundosEjecucion,
                     horaInicioParaTimeline // Hora de inicio para el timeline de simulación
             );
+
+            // JESUS // 3.1 NUEVO: Obtener solución CON tiempos calculados por ALNS
+            // Map<Producto, RutaConTiempos> solucionConTiempos = solver.obtenerSolucionConTiempos();
+            // log.info("Solución con tiempos obtenida: {} productos", solucionConTiempos.size());
+
+            // ResultadoAlgoritmoDTO resultado;
+            // // 4. Convertir a DTO
+            // resultado = convertirSolucionAResultado(
+            //         solucionProductos,
+            //         solucionConTiempos,
+            //         horaInicioSimulacion,
+            //         horaFinSimulacion,
+            //         segundosEjecucion,
+            //         esSemanal
+            // );
+
             log.info("✅ Algoritmo completado exitosamente en {} segundos", segundosEjecucion);
             log.info("   Total productos asignados: {}", resultado.getTotalProductos());
 
@@ -388,46 +406,100 @@ private List<VueloSimpleDTO> convertirVuelosADTOConTiempos(ArrayList<Vuelo> vuel
 
     return resultado;
 }
+//JESUS: considera esSemanal para dividir generarLineaDeTiempoSimulacion de dia a dia y semanal
+/*             Map<Producto, ArrayList<Vuelo>> solucionProductos,
+            Map<Producto, RutaConTiempos> solucionConTiempos,
+            LocalDateTime horaInicio,
+            LocalDateTime horaFin,
+            long segundosEjecucion,
+            boolean esSemanal) {
+        
+        List<RutaProductoDTO> rutasProductos = new ArrayList<>();
+        
+        // Convertir cada producto y su ruta a DTO
+        for (Map.Entry<Producto, ArrayList<Vuelo>> entry : solucionProductos.entrySet()) {
+            Producto producto = entry.getKey();
+            ArrayList<Vuelo> vuelos = entry.getValue();
 
-    private VueloSimpleDTO convertirVueloAVueloDTO(Vuelo vuelo) {
-        return VueloSimpleDTO.builder()
-                .id(vuelo.getId())
-                .codigo("Vuelo + " + vuelo.getId()) // se puede mejorar
-                .codigoOrigen(
-                        vuelo.getAeropuertoOrigen() != null ?
-                                vuelo.getAeropuertoOrigen().getCodigoIATA() : "???"
-                )
-                .codigoDestino(
-                        vuelo.getAeropuertoDestino() != null ?
-                                vuelo.getAeropuertoDestino().getCodigoIATA() : "???"
-                )
-                .horaSalida(vuelo.getHoraSalida())
-                .horaLlegada(vuelo.getHoraLlegada())
-                .costo(vuelo.getCosto())
+            // NUEVO: Obtener tiempos calculados por ALNS si están disponibles
+            RutaConTiempos rutaConTiempos = (solucionConTiempos != null)
+                    ? solucionConTiempos.get(producto)
+                    : null;
+
+            // Convertir vuelos a DTO, incluyendo tiempos si están disponibles
+            List<VueloSimpleDTO> vuelosDTO = convertirVuelosADTOConTiempos(vuelos, rutaConTiempos);
+
+            RutaProductoDTO rutaProducto = RutaProductoDTO.builder()
+                .idProducto(producto.getId())
+                .idPedido(producto.getPedido() != null ? producto.getPedido().getId() : null)
+                .nombrePedido(producto.getPedido() != null ? 
+                    producto.getPedido().getNombre() : "Pedido-" + producto.getPedido().getId())
+                .nombreProducto(producto.getNombre() != null ? 
+                    producto.getNombre() : "Producto-" + producto.getId())
+                .peso(producto.getPeso())
+                .volumen(producto.getVolumen())
+                .codigoOrigen(producto.getPedido() != null ? 
+                    producto.getPedido().getAeropuertoOrigenCodigo() : null)
+                .codigoDestino(producto.getPedido() != null ? 
+                    producto.getPedido().getAeropuertoDestinoCodigo() : null)
+                .vuelos(vuelosDTO)
+                .cantidadVuelos(vuelos.size())
+                .tiempoTotalHoras(calcularTiempoTotal(vuelos))
+                .estado(producto.getEstado() != null ? producto.getEstado().toString() : "DESCONOCIDO")
+                // NUEVOS campos con tiempos del ALNS
+                .horaEntregaEstimada(
+                        rutaConTiempos != null ? rutaConTiempos.getHoraFinRuta() : null)
+                .llegoATiempo(rutaConTiempos != null ? rutaConTiempos.llegoATiempo() : null)
+                .margenHoras(rutaConTiempos != null ? rutaConTiempos.getMargenHoras() : null)
                 .build();
-    }
-
-    private LocalDateTime reconstruirFechaHora(Pedido pedido, Vuelo vuelo, boolean esSalida) {
-
-        LocalDate fechaBase = pedido.getFechaPedido().toLocalDate(); // debes tener este campo
-
-        LocalTime hora = esSalida ? vuelo.getHoraSalida() : vuelo.getHoraLlegada();
-
-        LocalDateTime fechaHora = LocalDateTime.of(fechaBase, hora);
-
-        // Si es llegada y la hora llega antes de la salida → cruzó medianoche
-        if (!esSalida &&
-                vuelo.getHoraLlegada() != null &&
-                vuelo.getHoraSalida() != null &&
-                vuelo.getHoraLlegada().isBefore(vuelo.getHoraSalida())) {
-
-            fechaHora = fechaHora.plusDays(1);
+            
+            rutasProductos.add(rutaProducto);
+        }
+        
+        // Calcular estadísticas
+        int totalProductos = rutasProductos.size();
+        int totalPedidos = rutasProductos.stream()
+            .map(RutaProductoDTO::getIdPedido)
+            .collect(Collectors.toSet())
+            .size();
+        
+        // Generar timeline temporal de simulación
+        log.info("Generando timeline de simulación...");
+        LineaDeTiempoSimulacionDTO timeline;
+        if(esSemanal){
+            timeline = generarLineaDeTiempoSimulacion(rutasProductos,horaInicio);
+        }else{//generarLineaDeTiempoDiaADia
+            timeline = generarLineaDeTiempoSimulacion(
+                    rutasProductos,
+                    horaInicio
+            );
         }
 
-        return fechaHora;
+        log.info("Timeline generado con {} eventos", timeline.getEventos().size());
+        
+        // Calcular costo total de las rutas
+        double costoTotal = rutasProductos.stream()
+            .mapToDouble(ruta -> ruta.getVuelos().stream()
+                .mapToDouble(v -> v.getCosto() != null ? v.getCosto() : 0.0)
+                .sum())
+            .sum();
+        
+        return ResultadoAlgoritmoDTO.builder()
+            .exitoso(true)
+            .mensaje("Algoritmo ejecutado exitosamente")
+            .horaInicio(horaInicio)
+            .horaFin(horaFin)
+            .segundosEjecucion(segundosEjecucion)
+            .totalProductos(totalProductos)
+            .totalPedidos(totalPedidos)
+            .rutasProductos(rutasProductos)
+            .costoTotal(costoTotal)
+            .porcentajeAsignacion(100.0) // TODO: calcular basado en pedidos totales
+            .lineaDeTiempo(timeline)  // Timeline de simulación en memoria
+            .build();
     }
-
-
+ */
+//JESUS TERMINA
     /**
      * Convierte lista de vuelos a VueloSimpleDTO evitando referencias circulares
      */
@@ -548,7 +620,7 @@ private List<VueloSimpleDTO> convertirVuelosADTOConTiempos(ArrayList<Vuelo> vuel
                     solicitud.getHoraInicioSimulacion(), solicitud.getHoraFinSimulacion());
 
             // Ejecutar algoritmo
-            return ejecutarAlgoritmo(solicitud,1);
+            return ejecutarAlgoritmo(solicitud,1,false);
 
         } catch (Exception e) {
             log.error("❌ Error ejecutando escenario diario", e);
@@ -563,117 +635,6 @@ private List<VueloSimpleDTO> convertirVuelosADTOConTiempos(ArrayList<Vuelo> vuel
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(resultadoError);
         }
     }
-//    public ResponseEntity<ResultadoAlgoritmoDTO> ejecutarEscenarioDiario(
-//            @RequestBody(required = false) AlnsRequestDTO solicitud) {
-//
-//        LocalDateTime horaInicioBackend = LocalDateTime.now();
-//        log.info("🚀 Ejecutando algoritmo ALNS - ESCENARIO DIARIO");
-//
-//        try {
-//            if (solicitud == null) {
-//                solicitud = new AlnsRequestDTO();
-//                solicitud.setUsarBaseDatos(true);
-//            }
-//
-//            if (solicitud.getHoraInicioSimulacion() == null) {
-//                return ResponseEntity.badRequest().body(
-//                        ResultadoAlgoritmoDTO.builder()
-//                                .exitoso(false)
-//                                .mensaje("horaInicioSimulacion es requerida")
-//                                .horaInicio(horaInicioBackend)
-//                                .horaFin(LocalDateTime.now())
-//                                .build()
-//                );
-//            }
-//
-//            // ==============================
-//            // 1. Calcular la horaFin si no viene
-//            // ==============================
-//            if (solicitud.getHoraFinSimulacion() == null) {
-//
-//                if (solicitud.getDuracionSimulacionHoras() == null &&
-//                        solicitud.getDuracionSimulacionDias() == null) {
-//
-//                    solicitud.setDuracionSimulacionHoras(1.0); // 30 minutos por defecto
-//                }
-//
-//                LocalDateTime horaFin;
-//
-//                if (solicitud.getDuracionSimulacionHoras() != null) {
-//                    long minutos = (long) (solicitud.getDuracionSimulacionHoras() * 60);
-//                    horaFin = solicitud.getHoraInicioSimulacion().plusMinutes(minutos);
-//
-//                } else {
-//                    horaFin = solicitud.getHoraInicioSimulacion()
-//                            .plusDays(solicitud.getDuracionSimulacionDias());
-//                }
-//
-//                solicitud.setHoraFinSimulacion(horaFin);
-//            }
-//
-//            LocalDateTime windowStart = solicitud.getHoraInicioSimulacion();
-//            LocalDateTime windowEnd = solicitud.getHoraFinSimulacion();
-//
-//            log.info("Ventana temporal: {} -> {}", windowStart, windowEnd);
-//
-//            // ==============================
-//            // 2. Ejecutar ALNS COMPLETO
-//            // ==============================
-//            ResultadoAlgoritmoDTO fullResult = ejecutarAlgoritmoInterno(solicitud);
-//
-//            if (!fullResult.getExitoso()) {
-//                return ResponseEntity.ok(fullResult);
-//            }
-//
-//            // ==============================
-//            // 3. Filtrar SOLO productos cuya horaSalida reconstruida cae dentro de la ventana
-//            // ==============================
-//            List<RutaProductoDTO> rutasVentana = fullResult.getRutasProductos().stream()
-//                    .filter(r -> {
-//                        LocalDateTime salida = r.getHoraSalida();
-//                        return salida != null &&
-//                                !salida.isBefore(windowStart) &&
-//                                !salida.isAfter(windowEnd);
-//                    })
-//                    .toList();
-//
-//            log.info("Productos en ventana: {}", rutasVentana.size());
-//
-//            // ==============================
-//            // 4. Reconstruir mapa {Producto → Vuelos} para el conversor
-//            // ==============================
-//            Map<Producto, ArrayList<Vuelo>> mapaVentana = reconstruirMapa(rutasVentana);
-//
-//            // ==============================
-//            // 5. Convertir solo la ventana al formato DTO completo para el frontend
-//            // ==============================
-//            ResultadoAlgoritmoDTO resultadoVentana =
-//                    convertirSolucionAResultadoConSalida(
-//                            mapaVentana,
-//                            windowStart,
-//                            windowEnd,
-//                            0
-//                    );
-//
-//            resultadoVentana.setMensaje(
-//                    "Ventana procesada: " + windowStart + " → " + windowEnd
-//            );
-//
-//            return ResponseEntity.ok(resultadoVentana);
-//
-//        } catch (RuntimeException e) {
-//            log.error("❌ Error en /diario", e);
-//
-//            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-//                .body(ResultadoAlgoritmoDTO.builder()
-//                        .exitoso(false)
-//                        .mensaje("Error: " + e.getMessage())
-//                        .horaInicio(horaInicioBackend)
-//                        .horaFin(LocalDateTime.now())
-//                        .build()
-//                );
-//        }
-//    }
 
 //    private ResultadoAlgoritmoDTO ejecutarAlgoritmoInterno(AlnsRequestDTO solicitud) {
 //        return ejecutarAlgoritmo(solicitud,1).getBody();
@@ -853,7 +814,7 @@ private List<VueloSimpleDTO> convertirVuelosADTOConTiempos(ArrayList<Vuelo> vuel
         
         try {
             // Validar solicitud
-            if (solicitud == null) {
+            if (solicitud == null) { //NUNCA PASARA
                 solicitud = AlnsRequestDTO.builder()
                     .usarBaseDatos(true)
                     .build();
@@ -888,7 +849,7 @@ private List<VueloSimpleDTO> convertirVuelosADTOConTiempos(ArrayList<Vuelo> vuel
             log.info("⚠️ ADVERTENCIA: La ejecución semanal puede tomar 30-90 minutos");
             
             // Ejecutar algoritmo
-            return ejecutarAlgoritmo(solicitud,0);
+            return ejecutarAlgoritmo(solicitud,0,true);
             
         } catch (Exception e) {
             log.error("❌ Error ejecutando escenario semanal", e);
@@ -903,18 +864,410 @@ private List<VueloSimpleDTO> convertirVuelosADTOConTiempos(ArrayList<Vuelo> vuel
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(resultadoError);
         }
     }
-    
+    /**
+     * Genera timeline de simulación para una ventana de 1 hora.
+     * Agrupa vuelos por ruta para evitar duplicados y valida vuelos en curso.
+     *
+     * @param rutasProductos Rutas de productos
+     * @param horaInicio Hora de inicio de la ventana
+     * @return Timeline con eventos dentro de la ventana
+     */
+    private LineaDeTiempoSimulacionDTO generarLineaDeTiempoDiaADia(
+            List<RutaProductoDTO> rutasProductos,
+            LocalDateTime horaInicio) {
+
+        List<EventoLineaDeTiempoVueloDTO> eventos = new ArrayList<>();
+        Set<Integer> aeropuertosSet = new HashSet<>();
+        LocalDateTime horaFinVentana = horaInicio.plusHours(1);
+
+        // Clase auxiliar para agrupar vuelos
+        class InfoVueloVentana {
+            VueloSimpleDTO vuelo;
+            LocalDateTime horaSalida;
+            LocalDateTime horaLlegada;
+            double horasTransporte;
+            Set<Integer> idsProductos = new HashSet<>();
+            Set<Integer> idsPedidos = new HashSet<>();
+        }
+
+        Map<String, InfoVueloVentana> vuelosVentana = new HashMap<>();
+
+        // Agrupar vuelos
+        for (RutaProductoDTO rutaProducto : rutasProductos) {
+            LocalDateTime tiempoActualProducto = (rutaProducto.getFechaPedido() != null)
+                    ? rutaProducto.getFechaPedido()
+                    : horaInicio;
+
+            for (VueloSimpleDTO vuelo : rutaProducto.getVuelos()) {
+                if (vuelo.getIdAeropuertoOrigen() != null) aeropuertosSet.add(vuelo.getIdAeropuertoOrigen());
+                if (vuelo.getIdAeropuertoDestino() != null) aeropuertosSet.add(vuelo.getIdAeropuertoDestino());
+
+                double horasTransporte = (vuelo.getTiempoTransporte() != null && vuelo.getTiempoTransporte() > 0)
+                        ? vuelo.getTiempoTransporte()
+                        : 2.0;
+
+                LocalDateTime horaSalidaVuelo;
+                if (vuelo.getHoraSalida() != null) {
+                    horaSalidaVuelo = tiempoActualProducto.toLocalDate().atTime(vuelo.getHoraSalida());
+                    // Significa que el vuelo ya salio y esta en el aire
+                    if (horaSalidaVuelo.isBefore(tiempoActualProducto)) {
+                        horaSalidaVuelo = horaSalidaVuelo.plusDays(1);
+                    }
+                } else {
+                    horaSalidaVuelo = tiempoActualProducto;
+                }
+
+                LocalDateTime horaLlegadaVuelo = horaSalidaVuelo.plusMinutes((long) (horasTransporte * 60));
+
+                String claveVuelo = vuelo.getId() + "-" + horaSalidaVuelo.withSecond(0).withNano(0).toString();
+                InfoVueloVentana info = vuelosVentana.get(claveVuelo);
+                if (info == null) {
+                    info = new InfoVueloVentana();
+                    info.vuelo = vuelo;
+                    info.horaSalida = horaSalidaVuelo;
+                    info.horaLlegada = horaLlegadaVuelo;
+                    info.horasTransporte = horasTransporte;
+                    vuelosVentana.put(claveVuelo, info);
+                }
+
+                info.idsProductos.add(rutaProducto.getIdProducto());
+                info.idsPedidos.add(rutaProducto.getIdPedido());
+
+                tiempoActualProducto = horaLlegadaVuelo.plusMinutes(60);
+            }
+        }
+
+        log.info("Agrupados {} rutas en {} vuelos únicos (ventana)",
+                rutasProductos.size(), vuelosVentana.size());
+        log.info("Generando eventos para ventana {} a {}",
+                horaInicio, horaFinVentana);
+        int contadorEventos = 0;
+        for (Map.Entry<String, InfoVueloVentana> entry : vuelosVentana.entrySet()) {
+            InfoVueloVentana info = entry.getValue();
+            VueloSimpleDTO vuelo = info.vuelo;
+            List<Integer> pedidosList = new ArrayList<>(info.idsPedidos);
+            log.info("Evaluando vuelo {} ({} -> {}), salida={}, llegada={}",
+                    vuelo.getCodigo(),
+                    vuelo.getCodigoOrigen(),
+                    vuelo.getCodigoDestino(),
+                    info.horaSalida,
+                    info.horaLlegada);
+            // Evento de salida dentro de la ventana
+            if (!info.horaSalida.isBefore(horaInicio) && info.horaSalida.isBefore(horaFinVentana)) {
+                log.info("✔ Evento DEPARTURE dentro de ventana");
+                eventos.add(EventoLineaDeTiempoVueloDTO.builder()
+                        .idEvento("DEP-" + contadorEventos)
+                        .tipoEvento("DEPARTURE")
+                        .horaEvento(info.horaSalida)
+                        .idVuelo(vuelo.getId())
+                        .codigoVuelo(vuelo.getCodigo())
+                        .cantidadProductos(info.idsProductos.size())
+                        .idProducto(info.idsProductos.iterator().next())
+                        .idPedido(pedidosList.get(0))
+                        .ciudadOrigen(vuelo.getCodigoOrigen())
+                        .ciudadDestino(vuelo.getCodigoDestino())
+                        .idAeropuertoOrigen(vuelo.getIdAeropuertoOrigen())
+                        .idAeropuertoDestino(vuelo.getIdAeropuertoDestino())
+                        .tiempoTransporteDias(info.horasTransporte / 24.0)
+                        .capacidadMaxima(vuelo.getCapacidadMaxima())
+                        .build());
+                contadorEventos++;
+                continue;
+            }
+
+            // Evento de llegada dentro de la ventana
+            if (!info.horaLlegada.isBefore(horaInicio) && info.horaLlegada.isBefore(horaFinVentana)) {
+                log.info("✔ Evento ARRIVAL dentro de ventana");
+                eventos.add(EventoLineaDeTiempoVueloDTO.builder()
+                        .idEvento("ARR-" + contadorEventos)
+                        .tipoEvento("ARRIVAL")
+                        .horaEvento(info.horaLlegada)
+                        .idVuelo(vuelo.getId())
+                        .codigoVuelo(vuelo.getCodigo())
+                        .cantidadProductos(info.idsProductos.size())
+                        .idProducto(info.idsProductos.iterator().next())
+                        .idPedido(pedidosList.get(0))
+                        .ciudadOrigen(vuelo.getCodigoOrigen())
+                        .ciudadDestino(vuelo.getCodigoDestino())
+                        .idAeropuertoOrigen(vuelo.getIdAeropuertoOrigen())
+                        .idAeropuertoDestino(vuelo.getIdAeropuertoDestino())
+                        .tiempoTransporteDias(info.horasTransporte / 24.0)
+                        .capacidadMaxima(vuelo.getCapacidadMaxima())
+                        .build());
+                contadorEventos++;
+                continue;
+            }
+
+            // Evento en curso (vuelo ya en el aire al inicio de la ventana)
+            if (info.horaSalida.isBefore(horaInicio) && info.horaLlegada.isAfter(horaInicio)) {
+                //NUEVO: Calcular progreso del vuelo
+                long duracionTotalMinutos = ChronoUnit.MINUTES.between(info.horaSalida, info.horaLlegada);
+                long minutosTranscurridos = ChronoUnit.MINUTES.between(info.horaSalida, horaInicio);
+
+                double progreso = (double) minutosTranscurridos / duracionTotalMinutos;
+
+                // Ajustar dentro de la ventana de 1 hora
+                LocalDateTime horaEventoVuelo = horaInicio.plusMinutes(
+                        Math.min(59, Math.max(0, (long)(progreso * 60)))
+                );
+                log.info("✔ Vuelo en curso al inicio de ventana (IN_FLIGHT)");
+                eventos.add(EventoLineaDeTiempoVueloDTO.builder()
+                        .idEvento("ACTIVE-" + contadorEventos)
+                        .tipoEvento("IN_FLIGHT")
+                        .horaEvento(horaEventoVuelo)
+                        .idVuelo(vuelo.getId())
+                        .codigoVuelo(vuelo.getCodigo())
+                        .cantidadProductos(info.idsProductos.size())
+                        .idProducto(info.idsProductos.iterator().next())
+                        .idPedido(pedidosList.get(0))
+                        .ciudadOrigen(vuelo.getCodigoOrigen())
+                        .ciudadDestino(vuelo.getCodigoDestino())
+                        .idAeropuertoOrigen(vuelo.getIdAeropuertoOrigen())
+                        .idAeropuertoDestino(vuelo.getIdAeropuertoDestino())
+                        .tiempoTransporteDias(info.horasTransporte / 24.0)
+                        .capacidadMaxima(vuelo.getCapacidadMaxima())
+                        .build());
+                contadorEventos++;
+                continue;
+            }
+        }
+
+        eventos.sort(Comparator.comparing(EventoLineaDeTiempoVueloDTO::getHoraEvento));
+
+        log.info("Timeline ventana generado: {} eventos", eventos.size());
+        LocalDateTime horaFin = eventos.isEmpty() ? horaInicio : eventos.get(eventos.size() - 1).getHoraEvento();
+        long duracionMinutos = ChronoUnit.MINUTES.between(horaInicio, horaFin);
+
+        return LineaDeTiempoSimulacionDTO.builder()
+                .horaInicioSimulacion(horaInicio)
+                .horaFinSimulacion(horaFinVentana)
+                .duracionTotalMinutos(duracionMinutos)
+                .eventos(eventos)
+                .totalEventos(eventos.size())
+                .rutasProductos(rutasProductos)
+                .totalProductos(rutasProductos.size())
+                .totalVuelos(vuelosVentana.size())
+                .totalAeropuertos(aeropuertosSet.size())
+                .build();
+    }
+
+//    /**
+//     * Genera timeline temporal de operacion dia a dia con eventos de vuelos.
+//     * OPTIMIZADO: Agrupa vuelos por ruta para evitar duplicados.
+//     *
+//     * @param rutasProductos Rutas de productos
+//     * @param horaInicio Hora de inicio de la simulación
+//     * @return Timeline con eventos ordenados temporalmente
+//     */
+//    private LineaDeTiempoSimulacionDTO generarLineaDeTiempoDiaADia(
+//            List<RutaProductoDTO> rutasProductos,
+//            LocalDateTime horaInicio) {
+//
+//        List<EventoLineaDeTiempoVueloDTO> eventos = new ArrayList<>();
+//        Set<Integer> aeropuertosSet = new HashSet<>();
+//        LocalDateTime horaFinVentana = horaInicio.plusHours(1);
+//
+//        // Clase auxiliar para agrupar vuelos por ruta
+//        class InfoGrupoVuelo {
+//            VueloSimpleDTO vuelo;
+//            LocalDateTime horaSalida;
+//            LocalDateTime horaLlegada;
+//            List<Integer> idsProductos = new ArrayList<>();
+//            List<Integer> idsPedidos = new ArrayList<>();
+//        }
+//
+//        // Agrupar vuelos por ruta (origen-destino-tiempo) para evitar duplicados
+//        Map<String, InfoGrupoVuelo> gruposVuelos = new HashMap<>();
+//
+//        // Primer paso: Agrupar vuelos por ruta y tiempo
+//        for (RutaProductoDTO rutaProducto : rutasProductos) {
+//            LocalDateTime tiempoActualProducto = horaInicio;
+//
+//            for (int i = 0; i < rutaProducto.getVuelos().size(); i++) {
+//                VueloSimpleDTO vuelo = rutaProducto.getVuelos().get(i);
+//
+//                // Rastrear aeropuertos (igual que morapack-backend líneas 57-62)
+//                if (vuelo.getIdAeropuertoOrigen() != null) {
+//                    aeropuertosSet.add(vuelo.getIdAeropuertoOrigen());
+//                }
+//                if (vuelo.getIdAeropuertoDestino() != null) {
+//                    aeropuertosSet.add(vuelo.getIdAeropuertoDestino());
+//                }
+//
+//                // Calcular tiempos de salida y llegada
+//                LocalDateTime horaSalidaVuelo;
+//                LocalDateTime horaLlegadaVuelo;
+//
+//                if (vuelo.getHoraSalida() != null && vuelo.getHoraLlegada() != null) {
+//                    // Combinar fecha de simulación con hora programada
+//                    horaSalidaVuelo = tiempoActualProducto.toLocalDate()
+//                        .atTime(vuelo.getHoraSalida());
+//
+//                    // Si la hora de salida ya pasó hoy, programar para mañana
+////                    if (horaSalidaVuelo.isBefore(tiempoActualProducto)) {
+////                        horaSalidaVuelo = horaSalidaVuelo.plusDays(1);
+////                    }
+//
+//                    // Calcular hora de llegada (puede cruzar medianoche)
+//                    horaLlegadaVuelo = horaSalidaVuelo.toLocalDate()
+//                        .atTime(vuelo.getHoraLlegada());
+//                    if (vuelo.getHoraLlegada().isBefore(vuelo.getHoraSalida())) {
+//                        horaLlegadaVuelo = horaLlegadaVuelo.plusDays(1);
+//                    }
+//                } else {
+//                    // Fallback: usar tiempo de transporte
+//                    long minutosTransporte = (long) ((vuelo.getTiempoTransporte() != null ?
+//                        vuelo.getTiempoTransporte() : 1.0) * 60);
+//                    horaSalidaVuelo = tiempoActualProducto;
+//                    horaLlegadaVuelo = horaSalidaVuelo.plusMinutes(minutosTransporte);
+//                }
+//
+//                // Crear clave única para este vuelo (ruta + hora redondeada)
+//                LocalDateTime horaSalidaRedondeada = horaSalidaVuelo
+//                    .withMinute(0).withSecond(0).withNano(0);
+//                String claveVuelo = vuelo.getCodigoOrigen() + "-" +
+//                                   vuelo.getCodigoDestino() + "-" +
+//                                   horaSalidaRedondeada.toString();
+//
+//                InfoGrupoVuelo grupoInfo = gruposVuelos.get(claveVuelo);
+//                if (grupoInfo == null) {
+//                    grupoInfo = new InfoGrupoVuelo();
+//                    grupoInfo.vuelo = vuelo;
+//                    grupoInfo.horaSalida = horaSalidaVuelo;
+//                    grupoInfo.horaLlegada = horaLlegadaVuelo;
+//                    gruposVuelos.put(claveVuelo, grupoInfo);
+//                }
+//
+//                // Agregar este producto al grupo
+//                grupoInfo.idsProductos.add(rutaProducto.getIdProducto());
+//                grupoInfo.idsPedidos.add(rutaProducto.getIdPedido());
+//
+//                // Próximo vuelo: esperar 1 hora de layover después de llegada
+//                //tiempoActualProducto = horaLlegadaVuelo.plusMinutes(60);
+//            }
+//        }
+//
+//        log.info("Agrupados {} rutas de productos en {} grupos de vuelos únicos",
+//                 rutasProductos.size(), gruposVuelos.size());
+//
+//        // Segundo paso: Crear eventos para vuelos agrupados
+//        int contadorEventos = 0;
+//        for (Map.Entry<String, InfoGrupoVuelo> entry : gruposVuelos.entrySet()) {
+//            InfoGrupoVuelo grupo = entry.getValue();
+//            VueloSimpleDTO vuelo = grupo.vuelo;
+//
+//            log.info("Vuelo {} salida={} llegada={} ventana=[{},{}]",
+//                    vuelo.getCodigo(), grupo.horaSalida, grupo.horaLlegada, horaInicio, horaFinVentana);
+//
+//            if (grupo.horaSalida.isAfter(horaInicio) && grupo.horaSalida.isBefore(horaFinVentana)) {
+//                // Evento de salida
+//                EventoLineaDeTiempoVueloDTO eventoSalida = EventoLineaDeTiempoVueloDTO.builder()
+//                        .idEvento("DEP-GROUP-" + contadorEventos)
+//                        .tipoEvento("DEPARTURE")
+//                        .horaEvento(grupo.horaSalida)
+//                        .idVuelo(vuelo.getId())
+//                        .codigoVuelo(vuelo.getCodigo())
+//                        .cantidadProductos(grupo.idsProductos.size())
+//                        .idProducto(grupo.idsProductos.get(0)) // Producto representativo
+//                        .idPedido(grupo.idsPedidos.get(0))
+//                        .ciudadOrigen(vuelo.getCodigoOrigen())
+//                        .ciudadDestino(vuelo.getCodigoDestino())
+//                        .idAeropuertoOrigen(vuelo.getIdAeropuertoOrigen())
+//                        .idAeropuertoDestino(vuelo.getIdAeropuertoDestino())
+//                        .tiempoTransporteDias(vuelo.getTiempoTransporte() != null ?
+//                                vuelo.getTiempoTransporte() / 24.0 : 0.0)
+//                        .capacidadMaxima(vuelo.getCapacidadMaxima())
+//                        .build();
+//
+//                eventos.add(eventoSalida);
+//                contadorEventos++;
+//            }
+//
+//            if (grupo.horaLlegada.isAfter(horaInicio) && grupo.horaLlegada.isBefore(horaFinVentana)) {
+//                // Evento de llegada
+//                EventoLineaDeTiempoVueloDTO eventoLlegada = EventoLineaDeTiempoVueloDTO.builder()
+//                        .idEvento("ARR-GROUP-" + contadorEventos)
+//                        .tipoEvento("ARRIVAL")
+//                        .horaEvento(grupo.horaLlegada)
+//                        .idVuelo(vuelo.getId())
+//                        .codigoVuelo(vuelo.getCodigo())
+//                        .cantidadProductos(grupo.idsProductos.size())
+//                        .idProducto(grupo.idsProductos.get(0))
+//                        .idPedido(grupo.idsPedidos.get(0))
+//                        .ciudadOrigen(vuelo.getCodigoOrigen())
+//                        .ciudadDestino(vuelo.getCodigoDestino())
+//                        .idAeropuertoOrigen(vuelo.getIdAeropuertoOrigen())
+//                        .idAeropuertoDestino(vuelo.getIdAeropuertoDestino())
+//                        .tiempoTransporteDias(vuelo.getTiempoTransporte() != null ?
+//                                vuelo.getTiempoTransporte() / 24.0 : 0.0)
+//                        .capacidadMaxima(vuelo.getCapacidadMaxima())
+//                        .build();
+//
+//                eventos.add(eventoLlegada);
+//                contadorEventos++;
+//            }
+//
+//            // Evento en curso si el vuelo ya estaba en el aire al inicio de la ventana
+//            if (grupo.horaSalida.isBefore(horaInicio) && grupo.horaLlegada.isAfter(horaInicio)) {
+//                // Evento en curso
+//                EventoLineaDeTiempoVueloDTO eventoEnCurso = EventoLineaDeTiempoVueloDTO.builder()
+//                        .idEvento("ACTIVE-GROUP-" + contadorEventos)
+//                        .tipoEvento("IN_FLIGHT")
+//                        .horaEvento(horaInicio) // instante actual de simulación
+//                        .idVuelo(vuelo.getId())
+//                        .codigoVuelo(vuelo.getCodigo())
+//                        .cantidadProductos(grupo.idsProductos.size())
+//                        .idProducto(grupo.idsProductos.get(0))
+//                        .idPedido(grupo.idsPedidos.get(0))
+//                        .ciudadOrigen(vuelo.getCodigoOrigen())
+//                        .ciudadDestino(vuelo.getCodigoDestino())
+//                        .idAeropuertoOrigen(vuelo.getIdAeropuertoOrigen())
+//                        .idAeropuertoDestino(vuelo.getIdAeropuertoDestino())
+//                        .tiempoTransporteDias(vuelo.getTiempoTransporte() != null ? vuelo.getTiempoTransporte() / 24.0 : 0.0)
+//                        .capacidadMaxima(vuelo.getCapacidadMaxima())
+//                        .build();
+//
+//                eventos.add(eventoEnCurso);
+//                contadorEventos++;
+//            }
+//        }
+//
+//        // Ordenar eventos por tiempo
+//        eventos.sort(Comparator.comparing(EventoLineaDeTiempoVueloDTO::getHoraEvento));
+//
+//        // Encontrar tiempo de fin de simulación
+//        //LocalDateTime horaFin = eventos.isEmpty() ? horaInicio : eventos.get(eventos.size() - 1).getHoraEvento();
+//        LocalDateTime horaFin = horaFinVentana;
+//
+//        long duracionMinutos = ChronoUnit.MINUTES.between(horaInicio, horaFin);
+//
+//        log.info("Timeline generado: {} eventos, duración {} minutos",
+//                 eventos.size(), duracionMinutos);
+//
+//        return LineaDeTiempoSimulacionDTO.builder()
+//            .horaInicioSimulacion(horaInicio)
+//            .horaFinSimulacion(horaFin)
+//            .duracionTotalMinutos(duracionMinutos)
+//            .eventos(eventos)
+//            .totalEventos(eventos.size())  // ✅ Total de eventos para el frontend
+//            .rutasProductos(rutasProductos)
+//            .totalProductos(rutasProductos.size())
+//            .totalVuelos(gruposVuelos.size())
+//            .totalAeropuertos(aeropuertosSet.size())
+//            .build();
+//    }
+
     /**
      * Genera timeline temporal de simulación con eventos de vuelos.
      * OPTIMIZADO: Agrupa vuelos por ruta para evitar duplicados.
-     * 
+     *
      * @param rutasProductos Rutas de productos
      * @param horaInicio Hora de inicio de la simulación
      * @return Timeline con eventos ordenados temporalmente
      */
     private LineaDeTiempoSimulacionDTO generarLineaDeTiempoSimulacion(
             List<RutaProductoDTO> rutasProductos,
-            LocalDateTime horaInicio) {
+            LocalDateTime horaInicio) { //la hora inicio es la hora que empieza la simulacion (fecha primer pedido)
 
         List<EventoLineaDeTiempoVueloDTO> eventos = new ArrayList<>();
         Set<Integer> aeropuertosSet = new HashSet<>();
@@ -929,7 +1282,7 @@ private List<VueloSimpleDTO> convertirVuelosADTOConTiempos(ArrayList<Vuelo> vuel
             Set<Integer> idsPedidos = new HashSet<>();
         }
 
-        // Mapa: clave = "idVuelo-horaSalida" → info del vuelo
+        // Mapa: clave = "idVuelo-horaSalida" → info del vuelo. jesus: Agrupar vuelos por ruta (origen-destino-tiempo) para evitar duplicados
         Map<String, InfoVueloReal> vuelosReales = new HashMap<>();
 
         // NUEVO: Mapa de idPedido -> codigoDestinoFinal para determinar si un vuelo es
@@ -994,6 +1347,8 @@ private List<VueloSimpleDTO> convertirVuelosADTOConTiempos(ArrayList<Vuelo> vuel
                     info.horasTransporte = horasTransporte;
                     vuelosReales.put(claveVuelo, info);
                 }
+
+                // Agregar este producto al grupo
                 info.idsProductos.add(rutaProducto.getIdProducto());
                 info.idsPedidos.add(rutaProducto.getIdPedido());
 
@@ -1143,14 +1498,16 @@ private List<VueloSimpleDTO> convertirVuelosADTOConTiempos(ArrayList<Vuelo> vuel
         }
 
         eventos.sort(Comparator.comparing(EventoLineaDeTiempoVueloDTO::getHoraEvento));
-
         return LineaDeTiempoSimulacionDTO.builder()
-                .horaInicioSimulacion(windowStart)
-                .horaFinSimulacion(windowEnd)
-                .duracionTotalMinutos(Duration.between(windowStart, windowEnd).toMinutes())
+                .horaInicioSimulacion(horaInicio)
+                .horaFinSimulacion(horaFin)
+                .duracionTotalMinutos(duracionMinutos)
                 .eventos(eventos)
-                .totalEventos(eventos.size())
-                .totalProductos(rutas.size())
+                .totalEventos(eventos.size())  // ✅ Total de eventos para el frontend
+                .rutasProductos(rutasProductos)
+                .totalProductos(rutasProductos.size())
+                .totalVuelos(vuelosReales.size())
+                .totalAeropuertos(aeropuertosSet.size())
                 .build();
     }
 }

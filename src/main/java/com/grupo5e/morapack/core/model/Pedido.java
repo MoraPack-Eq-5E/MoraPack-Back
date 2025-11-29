@@ -25,7 +25,7 @@ public class Pedido {
     @SequenceGenerator(name = "pedido_seq", sequenceName = "pedidos_id_seq", allocationSize = 50)
     private Integer id;
 
-    @Column(name = "external_id", unique = true, length = 50)
+    @Column(name = "external_id", length = 50)
     private String externalId;
 
     @Column(name = "nombre", nullable = true)
@@ -63,6 +63,8 @@ public class Pedido {
 
     @UpdateTimestamp
     private LocalDateTime fechaActualizacion;
+
+    private LocalDateTime fechaEntrega;
 
     // Relación con Ruta (opcional si ya tienes la clase)
     // NOTA: La relación con Ruta ahora se maneja desde Ruta.java

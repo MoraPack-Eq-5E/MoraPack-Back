@@ -270,7 +270,7 @@ public class VueloController {
         }
         
         // Marcar vuelo como FINALIZADO (como cancelado/no disponible)
-        vuelo.setEstado(EstadoVuelo.FINALIZADO);
+        vuelo.setEstado(EstadoVuelo.CANCELADO);
         vueloService.actualizar(id, vuelo);
         
         log.info("========================================");

@@ -24,7 +24,7 @@ public class Usuario {
     @Column(name = "tipo_data", insertable = false, updatable = false)
     private Integer tipoData;
     // Credenciales
-    @Column(nullable = false, unique = true, length = 100)
+    @Column(nullable = false, unique = false, length = 100)
     private String usernameOrEmail; // Para clientes puede ser correo, para empleados un username
 
     @Column(nullable = false)

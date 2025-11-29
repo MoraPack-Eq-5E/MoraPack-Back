@@ -335,7 +335,7 @@ const simulationState = {
     {
       id: 45,
       codigo: "SPIM-SKBO-14:00",
-      estado: "EN_CAMINO",
+      estado: "EN_VUELO",
       capacidadUsada: 8,
       capacidadMaxima: 20,
       productos: [/* ... */]

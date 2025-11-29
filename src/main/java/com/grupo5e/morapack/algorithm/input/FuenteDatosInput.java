@@ -78,8 +78,8 @@ public interface FuenteDatosInput {
                 .filter(p -> {
                     LocalDateTime fechaPedido = p.getFechaPedido();
                     return fechaPedido != null &&
-                           !fechaPedido.isBefore(horaInicio) &&
-                           !fechaPedido.isAfter(horaFin) && tipoData==0;//0 al ser semanal
+                           !fechaPedido.isBefore(finalHoraInicio) &&
+                           !fechaPedido.isAfter(finalHoraFin) && tipoData==0;//0 al ser semanal
                 })
                 .toList();
     }

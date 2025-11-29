@@ -1782,16 +1782,16 @@ public class ALNSSolver {
         String hhmm = String.format("%02d%02d", horaSalida.getHour(), horaSalida.getMinute());
         return "FL-" + vuelo.getId() + "-DAY-" + dayOffset + "-" + hhmm;
     }
-    private int calcularCapacidadUsada(String instanciaId) {
-        for (Map.Entry<String, ProductAssignment> entry : assignmentCache.entrySet()) {
-            ProductAssignment assignment = entry.getValue();
-            if (assignment.getFlightInstanceId().equals(instanciaId)) {
-                assignment.; // cada producto cuenta como 1 unidad
-            }
-        }
-
-        return capacidadUsada;
-    }
+//    private int calcularCapacidadUsada(String instanciaId) {
+//        for (Map.Entry<String, ProductAssignment> entry : assignmentCache.entrySet()) {
+//            ProductAssignment assignment = entry.getValue();
+//            if (assignment.getFlightInstanceId().equals(instanciaId)) {
+//                assignment.; // cada producto cuenta como 1 unidad
+//            }
+//        }
+//
+//        return capacidadUsada;
+//    }
 
     private List<Pedido> expandirPaquetesAUnidadesProducto(List<Pedido> pedidosOriginales) {
         List<Pedido> unidadesProducto = new ArrayList<>();

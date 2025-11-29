@@ -33,20 +33,50 @@ public class DataImportController {
     private final DataImportService dataImportService;
 
     /**
-     * Importar aeropuertos desde archivo .txt
-     * POST /api/data-import/airports
+     * Importar aeropuertos desde directorio predeterminado
+     * POST /api/data-import/airports (sin archivo)
+     */
+    @Operation(
+        summary = "Cargar aeropuertos desde directorio",
+        description = "Carga aeropuertos desde data/aeropuertosinfo.txt automáticamente"
+    )
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Aeropuertos cargados exitosamente"),
+        @ApiResponse(responseCode = "400", description = "Error en el procesamiento")
+    })
+    @PostMapping("/airports")
+    public ResponseEntity<Map<String, Object>> loadAirportsFromDirectory() {
+        log.info("📤 Cargando aeropuertos desde directorio predeterminado");
+        
+        Map<String, Object> result = dataImportService.importAirportsFromDirectory();
+        
+        boolean success = (boolean) result.get("success");
+        HttpStatus status = success ? HttpStatus.OK : HttpStatus.BAD_REQUEST;
+        
+        if (success) {
+            log.info("✅ Aeropuertos cargados: {}", result.get("count"));
+        } else {
+            log.error("❌ Error cargando aeropuertos: {}", result.get("message"));
+        }
+        
+        return ResponseEntity.status(status).body(result);
+    }
+
+    /**
+     * Importar aeropuertos desde archivo .txt subido
+     * POST /api/data-import/airports/upload
      * 
      * Formato esperado: aeropuertosinfo.txt
      */
     @Operation(
-        summary = "Importar aeropuertos",
-        description = "Importa aeropuertos desde archivo .txt y los guarda en BD inmediatamente"
+        summary = "Subir archivo de aeropuertos",
+        description = "Importa aeropuertos desde archivo .txt subido y los guarda en BD inmediatamente"
     )
     @ApiResponses(value = {
         @ApiResponse(responseCode = "200", description = "Aeropuertos importados exitosamente"),
         @ApiResponse(responseCode = "400", description = "Archivo inválido o error en el procesamiento")
     })
-    @PostMapping(value = "/airports", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PostMapping(value = "/airports/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<Map<String, Object>> uploadAirports(
             @Parameter(description = "Archivo aeropuertosinfo.txt")
             @RequestParam("file") MultipartFile file) {
@@ -87,21 +117,51 @@ public class DataImportController {
     }
 
     /**
-     * Importar vuelos desde archivo .txt
-     * POST /api/data-import/flights
+     * Cargar vuelos desde directorio predeterminado
+     * POST /api/data-import/flights (sin archivo)
+     */
+    @Operation(
+        summary = "Cargar vuelos desde directorio",
+        description = "Carga vuelos desde data/vuelos.txt automáticamente"
+    )
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Vuelos cargados exitosamente"),
+        @ApiResponse(responseCode = "400", description = "Error en el procesamiento")
+    })
+    @PostMapping("/flights")
+    public ResponseEntity<Map<String, Object>> loadFlightsFromDirectory() {
+        log.info("📤 Cargando vuelos desde directorio predeterminado");
+        
+        Map<String, Object> result = dataImportService.importFlightsFromDirectory();
+        
+        boolean success = (boolean) result.get("success");
+        HttpStatus status = success ? HttpStatus.OK : HttpStatus.BAD_REQUEST;
+        
+        if (success) {
+            log.info("✅ Vuelos cargados: {}", result.get("count"));
+        } else {
+            log.error("❌ Error cargando vuelos: {}", result.get("message"));
+        }
+        
+        return ResponseEntity.status(status).body(result);
+    }
+
+    /**
+     * Importar vuelos desde archivo .txt subido
+     * POST /api/data-import/flights/upload
      * 
      * Formato esperado: vuelos.txt (ORIGEN-DESTINO-SALIDA-LLEGADA-CAPACIDAD)
      * Requiere que existan aeropuertos en BD
      */
     @Operation(
-        summary = "Importar vuelos",
-        description = "Importa vuelos desde archivo .txt y los guarda en BD inmediatamente. Requiere aeropuertos previamente importados."
+        summary = "Subir archivo de vuelos",
+        description = "Importa vuelos desde archivo .txt subido y los guarda en BD inmediatamente. Requiere aeropuertos previamente importados."
     )
     @ApiResponses(value = {
         @ApiResponse(responseCode = "200", description = "Vuelos importados exitosamente"),
         @ApiResponse(responseCode = "400", description = "Archivo inválido, error en el procesamiento o aeropuertos no encontrados")
     })
-    @PostMapping(value = "/flights", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PostMapping(value = "/flights/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<Map<String, Object>> uploadFlights(
             @Parameter(description = "Archivo vuelos.txt")
             @RequestParam("file") MultipartFile file) {

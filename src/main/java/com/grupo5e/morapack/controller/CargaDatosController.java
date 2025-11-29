@@ -294,4 +294,77 @@ public class CargaDatosController {
         return directorioProyecto;
     }
 
+    @PostMapping("/load-for-daily")
+    @Operation(
+            summary = "Cargar pedidos para simulación diaria",
+            description = "Carga pedidos dentro de una ventana de 10 minutos para simulación en tiempo real")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Pedidos cargados exitosamente"),
+            @ApiResponse(responseCode = "400", description = "Parámetros inválidos"),
+            @ApiResponse(responseCode = "500", description = "Error durante la carga")
+    })
+    public ResponseEntity<Map<String, Object>> cargarParaSimulacionDiaria(
+            @Parameter(description = "Hora de inicio (ISO 8601)", example = "2025-01-02T00:00:00")
+            @RequestParam String startTime) {
+        
+        try {
+            // Parse ISO 8601 con timezone (ej: 2025-11-28T05:00:00.000Z)
+            LocalDateTime horaInicio;
+            if (startTime.endsWith("Z") || startTime.contains("+") || startTime.matches(".*[+-]\\d{2}:\\d{2}$")) {
+                // Tiene zona horaria - usar Instant y convertir a LocalDateTime
+                horaInicio = java.time.Instant.parse(startTime)
+                    .atZone(java.time.ZoneId.systemDefault())
+                    .toLocalDateTime();
+            } else {
+                // Formato sin zona horaria
+                horaInicio = LocalDateTime.parse(startTime);
+            }
+            LocalDateTime horaFin = horaInicio.plusMinutes(10);
+            
+            log.info("Cargando pedidos para simulación diaria: {} a {}", horaInicio, horaFin);
+            
+            String directorioData = obtenerDirectorioPredeterminado();
+            
+            DataLoadService.ResultadoCargaDatos resultado = 
+                dataLoadService.cargarPedidosDesdeArchivos(directorioData, horaInicio, horaFin);
+            
+            if (!resultado.getExito()) {
+                return ResponseEntity.internalServerError().body(Map.of(
+                    "success", false,
+                    "message", resultado.getMensajeError() != null ? resultado.getMensajeError() : "Error desconocido"
+                ));
+            }
+            
+            resultado.calcularDuracion();
+            Long duracionSeg = resultado.getDuracionSegundos() != null ? resultado.getDuracionSegundos() : 0L;
+            
+            Map<String, Object> respuesta = new HashMap<>();
+            respuesta.put("success", true);
+            respuesta.put("message", "Pedidos cargados para simulación diaria");
+            respuesta.put("statistics", Map.of(
+                "ordersLoaded", resultado.getPedidosCargados() != null ? resultado.getPedidosCargados() : 0,
+                "ordersCreated", resultado.getPedidosCreados() != null ? resultado.getPedidosCreados() : 0,
+                "ordersFiltered", resultado.getPedidosFiltrados() != null ? resultado.getPedidosFiltrados() : 0,
+                "customersCreated", 0,
+                "parseErrors", resultado.getErroresParseo() != null ? resultado.getErroresParseo() : 0,
+                "fileErrors", resultado.getErroresArchivos() != null ? resultado.getErroresArchivos() : 0,
+                "durationSeconds", duracionSeg
+            ));
+            respuesta.put("timeWindow", Map.of(
+                "startTime", horaInicio.toString(),
+                "endTime", horaFin.toString(),
+                "durationMinutes", 10
+            ));
+            
+            return ResponseEntity.ok(respuesta);
+            
+        } catch (Exception e) {
+            log.error("Error cargando pedidos para simulación diaria", e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                "success", false,
+                "message", "Error: " + e.getMessage()
+            ));
+        }
+    }
+
 }

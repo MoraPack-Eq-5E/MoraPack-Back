@@ -1009,5 +1009,160 @@ public class DataImportService {
         log.warn("TODO: Implementar limpieza de simulaciones cuando tengamos los repositorios");
         return 0;
     }
+
+    /**
+     * Importa aeropuertos desde directorio predeterminado (data/aeropuertosinfo.txt)
+     */
+    @Transactional
+    public Map<String, Object> importAirportsFromDirectory() {
+        Map<String, Object> result = new HashMap<>();
+        
+        try {
+            log.info("🏢 Cargando aeropuertos desde directorio predeterminado");
+            
+            // Obtener ruta del archivo
+            String directorioProyecto = System.getProperty("user.dir");
+            Path archivoAeropuertos = Path.of(directorioProyecto, "data", "aeropuertosinfo.txt");
+            
+            if (!Files.exists(archivoAeropuertos)) {
+                result.put("success", false);
+                result.put("message", "No se encontró el archivo: " + archivoAeropuertos);
+                result.put("count", 0);
+                log.error("❌ Archivo no encontrado: {}", archivoAeropuertos);
+                return result;
+            }
+            
+            // Usar LectorAeropuerto
+            LectorAeropuerto lector = new LectorAeropuerto(archivoAeropuertos.toString());
+            ArrayList<Aeropuerto> aeropuertos = lector.leerAeropuertos();
+            
+            if (aeropuertos.isEmpty()) {
+                result.put("success", false);
+                result.put("message", "No se encontraron aeropuertos en el archivo");
+                result.put("count", 0);
+                log.warn("❌ No se encontraron aeropuertos en el archivo");
+                return result;
+            }
+            
+            // Guardar en BD
+            HashSet<String> ciudadesYaGuardadas = new HashSet<>();
+            int aeropuertosGuardados = 0;
+            
+            for (Aeropuerto aeropuerto : aeropuertos) {
+                Ciudad ciudad = aeropuerto.getCiudad();
+                
+                if (ciudad != null && !ciudadesYaGuardadas.contains(ciudad.getNombre())) {
+                    ciudadRepository.save(ciudad);
+                    ciudadesYaGuardadas.add(ciudad.getNombre());
+                }
+                
+                Integer aeropuertoId = aeropuertoService.insertar(aeropuerto);
+                aeropuerto.setId(aeropuertoId);
+                
+                // Crear almacén para cada aeropuerto
+                Almacen almacen = new Almacen();
+                almacen.setAeropuerto(aeropuerto);
+                almacen.setNombre("Almacén " + (aeropuerto.getAlias() != null ? 
+                    aeropuerto.getAlias() : aeropuerto.getCodigoIATA()));
+                almacen.setCapacidadMaxima(aeropuerto.getCapacidadMaxima() != null ? 
+                    aeropuerto.getCapacidadMaxima() : 1000);
+                almacen.setCapacidadUsada(aeropuerto.getCapacidadActual() != null ? 
+                    aeropuerto.getCapacidadActual() : 0);
+                almacen.setEsAlmacenPrincipal(false);
+                almacenRepository.save(almacen);
+                
+                // Actualizar aeropuerto con almacén
+                aeropuerto.setAlmacen(almacen);
+                aeropuertoService.actualizar(aeropuertoId, aeropuerto);
+                
+                aeropuertosGuardados++;
+            }
+            
+            result.put("success", true);
+            result.put("message", "Aeropuertos importados desde directorio");
+            result.put("count", aeropuertosGuardados);
+            result.put("cities", ciudadesYaGuardadas.size());
+            
+            log.info("✅ Aeropuertos importados: {}, Ciudades: {}", aeropuertosGuardados, ciudadesYaGuardadas.size());
+            
+        } catch (Exception e) {
+            log.error("❌ Error importando aeropuertos desde directorio: {}", e.getMessage(), e);
+            result.put("success", false);
+            result.put("message", "Error al importar: " + e.getMessage());
+            result.put("error", e.getClass().getSimpleName());
+        }
+        
+        return result;
+    }
+
+    /**
+     * Importa vuelos desde directorio predeterminado (data/vuelos.txt)
+     */
+    @Transactional
+    public Map<String, Object> importFlightsFromDirectory() {
+        Map<String, Object> result = new HashMap<>();
+        
+        try {
+            log.info("✈️ Cargando vuelos desde directorio predeterminado");
+            
+            // Obtener ruta del archivo
+            String directorioProyecto = System.getProperty("user.dir");
+            Path archivoVuelos = Path.of(directorioProyecto, "data", "vuelos.txt");
+            
+            if (!Files.exists(archivoVuelos)) {
+                result.put("success", false);
+                result.put("message", "No se encontró el archivo: " + archivoVuelos);
+                result.put("count", 0);
+                log.error("❌ Archivo no encontrado: {}", archivoVuelos);
+                return result;
+            }
+            
+            // Cargar aeropuertos de BD
+            List<Aeropuerto> aeropuertosList = aeropuertoService.listar();
+            if (aeropuertosList.isEmpty()) {
+                result.put("success", false);
+                result.put("message", "No hay aeropuertos en la base de datos. Debe cargar aeropuertos primero.");
+                result.put("count", 0);
+                log.error("❌ No hay aeropuertos en BD");
+                return result;
+            }
+            
+            // Convertir List a ArrayList para LectorVuelos
+            ArrayList<Aeropuerto> aeropuertosArray = new ArrayList<>(aeropuertosList);
+            
+            // Usar LectorVuelos
+            LectorVuelos lector = new LectorVuelos(archivoVuelos.toString(), aeropuertosArray);
+            ArrayList<Vuelo> vuelos = lector.leerVuelos();
+            
+            if (vuelos.isEmpty()) {
+                result.put("success", false);
+                result.put("message", "No se encontraron vuelos en el archivo");
+                result.put("count", 0);
+                log.warn("❌ No se encontraron vuelos en el archivo");
+                return result;
+            }
+            
+            // Guardar en BD
+            int vuelosGuardados = 0;
+            for (Vuelo vuelo : vuelos) {
+                vueloService.insertar(vuelo);
+                vuelosGuardados++;
+            }
+            
+            result.put("success", true);
+            result.put("message", "Vuelos importados desde directorio");
+            result.put("count", vuelosGuardados);
+            
+            log.info("✅ Vuelos importados: {}", vuelosGuardados);
+            
+        } catch (Exception e) {
+            log.error("❌ Error importando vuelos desde directorio: {}", e.getMessage(), e);
+            result.put("success", false);
+            result.put("message", "Error al importar: " + e.getMessage());
+            result.put("error", e.getClass().getSimpleName());
+        }
+        
+        return result;
+    }
 }
 

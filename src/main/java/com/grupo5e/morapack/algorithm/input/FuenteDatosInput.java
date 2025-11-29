@@ -1,13 +1,12 @@
 package com.grupo5e.morapack.algorithm.input;
 
-import com.grupo5e.morapack.core.model.Aeropuerto;
-import com.grupo5e.morapack.core.model.Cancelacion;
-import com.grupo5e.morapack.core.model.Pedido;
-import com.grupo5e.morapack.core.model.Vuelo;
+import com.grupo5e.morapack.algorithm.alns.TramoConTiempo;
+import com.grupo5e.morapack.core.model.*;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Interfaz para abstraer las fuentes de datos del algoritmo ALNS.
@@ -57,14 +56,21 @@ public interface FuenteDatosInput {
      * @param horaFin Hora de fin de la ventana de simulación
      * @return Lista de pedidos dentro de la ventana de tiempo especificada
      */
+    //ESTO NO SIRVE ES EL DEFAULT
     default List<Pedido> cargarPedidosPorVentanaDeTiempo(
             List<Aeropuerto> aeropuertos,
             LocalDateTime horaInicio,
             LocalDateTime horaFin,
             int tipoData) {
+        //tipo data 1 = diario (ventana 1 hora)
+        //tipo data 0 = semanal (ventana 7 dias)
+        //tipo data 2 = colapso (ventana X dias)
+
         if(tipoData == 1){
-            horaFin = horaInicio;
-            horaInicio = horaFin.minusDays(1);
+            //Se capturan pedidos de la última hora
+            //ventana de 1 hora: 10am - 11am -> pedidos de 9am - 10am
+            horaFin = horaFin.minusHours(1);
+            horaInicio = horaFin.minusHours(1);
         }
         LocalDateTime finalHoraInicio = horaInicio;
         LocalDateTime finalHoraFin = horaFin;
@@ -77,5 +83,11 @@ public interface FuenteDatosInput {
                 })
                 .toList();
     }
+    String cargarInstanciaVuelo(TramoConTiempo tramo);
+    Map<String, InstanciaVuelo> inicializarCacheinstancia();
+    Map<String, ProductAssignment> inicializarCacheAsignacion();
+
+    void guardarAsignacionesProductos(List<ProductAssignment> asignaciones);
+    void guadarInstanciasVuelos(List<InstanciaVuelo> instancias);
 }
 

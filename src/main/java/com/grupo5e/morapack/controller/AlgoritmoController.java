@@ -189,7 +189,7 @@ public class AlgoritmoController {
                     producto.getPedido().getAeropuertoOrigenCodigo() : null)
                 .codigoDestino(producto.getPedido() != null ? 
                     producto.getPedido().getAeropuertoDestinoCodigo() : null)
-                .vuelos(convertirVuelosADTO(vuelos))
+                .vuelos(vuelosDTO)
                 .cantidadVuelos(vuelos.size())
                 .tiempoTotalHoras(calcularTiempoTotal(vuelos))
                 .estado(producto.getEstado() != null ? producto.getEstado().toString() : "DESCONOCIDO")
@@ -215,8 +215,8 @@ public class AlgoritmoController {
         LineaDeTiempoSimulacionDTO timeline;
         if(esSemanal){
             timeline = generarLineaDeTiempoSimulacion(rutasProductos,horaInicio);
-        }else{
-            timeline = generarLineaDeTiempoDiaADia(
+        }else{//generarLineaDeTiempoDiaADia
+            timeline = generarLineaDeTiempoSimulacion(
                     rutasProductos,
                     horaInicio
             );
@@ -579,6 +579,7 @@ public class AlgoritmoController {
                 LocalDateTime horaSalidaVuelo;
                 if (vuelo.getHoraSalida() != null) {
                     horaSalidaVuelo = tiempoActualProducto.toLocalDate().atTime(vuelo.getHoraSalida());
+                    // Significa que el vuelo ya salio y esta en el aire
                     if (horaSalidaVuelo.isBefore(tiempoActualProducto)) {
                         horaSalidaVuelo = horaSalidaVuelo.plusDays(1);
                     }
@@ -608,14 +609,22 @@ public class AlgoritmoController {
 
         log.info("Agrupados {} rutas en {} vuelos únicos (ventana)",
                 rutasProductos.size(), vuelosVentana.size());
-
+        log.info("Generando eventos para ventana {} a {}",
+                horaInicio, horaFinVentana);
         int contadorEventos = 0;
-        for (InfoVueloVentana info : vuelosVentana.values()) {
+        for (Map.Entry<String, InfoVueloVentana> entry : vuelosVentana.entrySet()) {
+            InfoVueloVentana info = entry.getValue();
             VueloSimpleDTO vuelo = info.vuelo;
             List<Integer> pedidosList = new ArrayList<>(info.idsPedidos);
-
+            log.info("Evaluando vuelo {} ({} -> {}), salida={}, llegada={}",
+                    vuelo.getCodigo(),
+                    vuelo.getCodigoOrigen(),
+                    vuelo.getCodigoDestino(),
+                    info.horaSalida,
+                    info.horaLlegada);
             // Evento de salida dentro de la ventana
             if (!info.horaSalida.isBefore(horaInicio) && info.horaSalida.isBefore(horaFinVentana)) {
+                log.info("✔ Evento DEPARTURE dentro de ventana");
                 eventos.add(EventoLineaDeTiempoVueloDTO.builder()
                         .idEvento("DEP-" + contadorEventos)
                         .tipoEvento("DEPARTURE")
@@ -633,10 +642,12 @@ public class AlgoritmoController {
                         .capacidadMaxima(vuelo.getCapacidadMaxima())
                         .build());
                 contadorEventos++;
+                continue;
             }
 
             // Evento de llegada dentro de la ventana
             if (!info.horaLlegada.isBefore(horaInicio) && info.horaLlegada.isBefore(horaFinVentana)) {
+                log.info("✔ Evento ARRIVAL dentro de ventana");
                 eventos.add(EventoLineaDeTiempoVueloDTO.builder()
                         .idEvento("ARR-" + contadorEventos)
                         .tipoEvento("ARRIVAL")
@@ -654,6 +665,7 @@ public class AlgoritmoController {
                         .capacidadMaxima(vuelo.getCapacidadMaxima())
                         .build());
                 contadorEventos++;
+                continue;
             }
 
             // Evento en curso (vuelo ya en el aire al inicio de la ventana)
@@ -668,7 +680,7 @@ public class AlgoritmoController {
                 LocalDateTime horaEventoVuelo = horaInicio.plusMinutes(
                         Math.min(59, Math.max(0, (long)(progreso * 60)))
                 );
-
+                log.info("✔ Vuelo en curso al inicio de ventana (IN_FLIGHT)");
                 eventos.add(EventoLineaDeTiempoVueloDTO.builder()
                         .idEvento("ACTIVE-" + contadorEventos)
                         .tipoEvento("IN_FLIGHT")
@@ -686,6 +698,7 @@ public class AlgoritmoController {
                         .capacidadMaxima(vuelo.getCapacidadMaxima())
                         .build());
                 contadorEventos++;
+                continue;
             }
         }
 

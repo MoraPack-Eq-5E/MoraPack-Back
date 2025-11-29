@@ -1,9 +1,7 @@
 package com.grupo5e.morapack.algorithm.input;
 
-import com.grupo5e.morapack.core.model.Aeropuerto;
-import com.grupo5e.morapack.core.model.Cancelacion;
-import com.grupo5e.morapack.core.model.Pedido;
-import com.grupo5e.morapack.core.model.Vuelo;
+import com.grupo5e.morapack.algorithm.alns.TramoConTiempo;
+import com.grupo5e.morapack.core.model.*;
 import com.grupo5e.morapack.utils.LectorAeropuerto;
 import com.grupo5e.morapack.utils.LectorCancelaciones;
 import com.grupo5e.morapack.utils.LectorVuelos;
@@ -11,6 +9,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Implementación de FuenteDatosInput que lee desde archivos .txt
@@ -82,6 +81,31 @@ public class FuenteDatosArchivo implements FuenteDatosInput {
             e.printStackTrace();
             return new ArrayList<>();
         }
+    }
+
+    @Override
+    public String cargarInstanciaVuelo(TramoConTiempo tramo) {
+        return "";
+    }
+
+    @Override
+    public Map<String, InstanciaVuelo> inicializarCacheinstancia() {
+        return null;
+    }
+
+    @Override
+    public Map<String, ProductAssignment> inicializarCacheAsignacion() {
+        return null;
+    }
+
+    @Override
+    public void guardarAsignacionesProductos(List<ProductAssignment> asignaciones) {
+
+    }
+
+    @Override
+    public void guadarInstanciasVuelos(List<InstanciaVuelo> instancias) {
+
     }
 
     @Override

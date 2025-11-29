@@ -79,7 +79,7 @@ public class VentanasTemporalesTest {
         vuelo.setCapacidadUsada(0);
         vuelo.setHoraSalida(LocalTime.of(10, 0));
         vuelo.setHoraLlegada(LocalTime.of(12, 0));
-        vuelo.setEstado(EstadoVuelo.CONFIRMADO); // Estados disponibles: CONFIRMADO, CON_RETRASO, EN_CAMINO, FINALIZADO
+        vuelo.setEstado(EstadoVuelo.DISPONIBLE); // Estados disponibles: DISPONIBLE, CANCELADO, EN_VUELO, FINALIZADO
         vuelo = vueloRepository.save(vuelo);
         
         // Expandir vuelo a instancia diaria
@@ -156,7 +156,7 @@ public class VentanasTemporalesTest {
         vuelo.setCapacidadUsada(0);
         vuelo.setHoraSalida(LocalTime.of(14, 0));
         vuelo.setHoraLlegada(LocalTime.of(16, 0));
-        vuelo.setEstado(EstadoVuelo.CONFIRMADO);
+        vuelo.setEstado(EstadoVuelo.DISPONIBLE);
         vuelo = vueloRepository.save(vuelo);
         
         // Crear productos en PENDING
@@ -209,7 +209,7 @@ public class VentanasTemporalesTest {
         vueloTemplate.setCapacidadUsada(0);
         vueloTemplate.setHoraSalida(LocalTime.of(8, 30));
         vueloTemplate.setHoraLlegada(LocalTime.of(11, 45));
-        vueloTemplate.setEstado(EstadoVuelo.CONFIRMADO);
+        vueloTemplate.setEstado(EstadoVuelo.DISPONIBLE);
         vueloTemplate = vueloRepository.save(vueloTemplate);
         
         // ACT: Expandir para 7 días

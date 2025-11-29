@@ -53,7 +53,7 @@ public class LecturaVuelos {
                 vuelo.setFrecuenciaPorDia(1);
                 vuelo.setTiempoTransporte(calcularDuracion(horaSalida, horaLlegada));
                 vuelo.setCosto(calcularCosto(capacidad));
-                vuelo.setEstado(EstadoVuelo.CONFIRMADO);
+                vuelo.setEstado(EstadoVuelo.DISPONIBLE);
                 vuelo.setTipoData(0);
                 vueloRepository.save(vuelo);
                 System.out.println("Vuelo registrado: " + codigoOrigen + " -> " + codigoDestino);

@@ -2,6 +2,7 @@ package com.grupo5e.morapack.algorithm.alns;
 
 import com.grupo5e.morapack.algorithm.input.FuenteDatosInput;
 import com.grupo5e.morapack.algorithm.input.FabricaFuenteDatos;
+import com.grupo5e.morapack.core.enums.EstadoInstanciaVuelo;
 import com.grupo5e.morapack.core.model.*;
 import com.grupo5e.morapack.core.model.Pedido;
 import com.grupo5e.morapack.core.enums.Continente;
@@ -11,6 +12,7 @@ import com.grupo5e.morapack.core.index.IndiceVuelos;
 import com.grupo5e.morapack.core.index.CacheDisponibilidad;
 import com.grupo5e.morapack.core.index.CacheRutas;
 import com.grupo5e.morapack.utils.LectorCancelaciones;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.*;
 import java.time.LocalDateTime;
@@ -26,6 +28,7 @@ import java.util.Comparator;
  * para integrarse en tu paquete/comunidad de modelos.
  */
 
+@Slf4j
 public class ALNSSolver {
     private HashMap<HashMap<Pedido, ArrayList<Vuelo>>, Integer> solucion;
 
@@ -38,7 +41,7 @@ public class ALNSSolver {
     private List<Pedido> pedidos;
 
     // Unitización - DESACTIVADA para evitar problemas con IDs en BD
-    private static final boolean HABILITAR_UNITIZACION_PRODUCTO = true;
+    private static final boolean HABILITAR_UNITIZACION_PRODUCTO = false;
     private ArrayList<Pedido> pedidosOriginales;
 
     // ProductTracker - Mapeo directo Producto → Ruta (versión simplificada)
@@ -97,6 +100,9 @@ public class ALNSSolver {
     private static final int HORIZON_DAYS = 4;
     private static final boolean DEBUG_MODE = false;
 
+    private int tipoData;
+    private Map<String, InstanciaVuelo> instanciaCache;
+    private Map<String, ProductAssignment> assignmentCache;
     /**
      * Constructor principal simplificado que usa FuenteDatosInput modular.
      * Permite ejecutar el algoritmo sin dependencias de Spring.
@@ -190,7 +196,7 @@ public class ALNSSolver {
         this.solucion = new HashMap<>();
         this.ocupacionAlmacenes = new HashMap<>();
         this.ocupacionTemporalAlmacenes = new HashMap<>();
-
+        this.tipoData = tipoData;
         // 6. Inicializar caches y estructuras
         //asignarAeropuertosOrigen();
         inicializarCacheCiudadAeropuerto();
@@ -472,7 +478,10 @@ public class ALNSSolver {
         // CRÍTICO: Actualizar ProductTracker con la mejor solución encontrada
         // (Siguiendo el patrón del Backend de ejemplo)
         System.out.println("\n=== ACTUALIZANDO SEGUIMIENTO DE PRODUCTOS ===");
-        actualizarSeguimientoProductos();
+        if(this.tipoData==0)
+            actualizarSeguimientoProductos();
+        else
+            actualizarSeguimientoProductosPorVentana();
 
         System.out.println("\n=== RESULTADO FINAL ALNS ===");
         this.imprimirDescripcionSolucion(2);
@@ -1679,6 +1688,109 @@ public class ALNSSolver {
         }
 
         System.out.println("✓ Productos rastreados: " + productosRastreados);
+    }
+    private void actualizarSeguimientoProductosPorVentana() {
+        if (productTracker == null) {
+            System.out.println("⚠️ ProductTracker no inicializado");
+            return;
+        }
+
+        if (mejorSolucion == null || mejorSolucion.isEmpty()) {
+            System.out.println("⚠️ No hay solución para rastrear productos");
+            return;
+        }
+
+        // Extraer el mapa de solución interno (mejorSolucion es un
+        // Map<HashMap<Pedido,ArrayList<Vuelo>>, Integer>)
+        HashMap<Pedido, ArrayList<Vuelo>> solucionActual = mejorSolucion.keySet().iterator().next();
+
+        if (solucionActual == null || solucionActual.isEmpty()) {
+            System.out.println("⚠️ No hay asignaciones en la mejor solución");
+            return;
+        }
+
+        int productosRastreados = 0;
+        int productosConTiempos = 0;
+        // Persistir las asignaciones en la base de datos
+        FuenteDatosInput fuenteDatos = FabricaFuenteDatos.crearFuenteDatos();
+        instanciaCache = new HashMap<>(fuenteDatos.inicializarCacheinstancia());
+        assignmentCache = new HashMap<>(fuenteDatos.inicializarCacheAsignacion());
+        List<InstanciaVuelo> instanciasNuevas = new ArrayList<>();
+        List<ProductAssignment> assignmentsNuevos = new ArrayList<>();
+
+        for (Map.Entry<Pedido, ArrayList<Vuelo>> entry : solucionActual.entrySet()) {
+            Pedido pedido = entry.getKey();
+            ArrayList<Vuelo> ruta = entry.getValue();
+
+            // Calcular tiempos absolutos de la ruta
+            RutaConTiempos rutaConTiempos = calcularTiemposRuta(pedido, ruta);
+
+            List<Producto> productos = pedido.getProductos();
+            if (productos != null && !productos.isEmpty()) {
+                for (TramoConTiempo tramo : rutaConTiempos.getTramos()) {
+                    // Verificar si la instancia de vuelo ya existe en cache
+                    String instanciaId = buildInstanciaVueloId(tramo.getVuelo(), tramo.getHoraSalidaReal(), T0);
+                    // 1️⃣ Verificar si la instancia existe en cache
+                    InstanciaVuelo instancia = instanciaCache.get(instanciaId);
+                    if (instancia == null) {
+                        instancia = new InstanciaVuelo();
+                        instancia.setIdInstancia(instanciaId);
+                        instancia.setVueloBase(tramo.getVuelo());
+                        instancia.setFechaHoraSalida(tramo.getHoraSalidaReal());
+                        instancia.setFechaHoraLlegada(tramo.getHoraLlegadaReal());
+                        instancia.setCapacidadMaxima(tramo.getVuelo().getCapacidadMaxima());
+                        instancia.setCapacidadUsada(0); // inicializa en 0
+                        instancia.setEstadoInstancia(EstadoInstanciaVuelo.PLANIFICADO);
+
+                        instanciaCache.put(instanciaId, instancia);
+                        instanciasNuevas.add(instancia);
+                    }
+
+                    // 2️⃣ Asignar productos a la ruta
+                    for (Producto producto : productos) {
+                        productTracker.assignProductToRouteWithTimes(producto, rutaConTiempos);
+
+                        String llave = producto.getId() + "-" + instanciaId;
+                        if (!assignmentCache.containsKey(llave)) {
+                            ProductAssignment assignment = new ProductAssignment();
+                            assignment.setProductoId(producto.getId());
+                            assignment.setPedidoId(pedido.getId());
+                            assignment.setFlightInstanceId(instanciaId);
+                            assignment.setHoraSalidaReal(tramo.getHoraSalidaReal());
+                            assignment.setHoraLlegadaReal(tramo.getHoraLlegadaReal());
+                            assignment.setEstadoProducto(producto.getEstado());
+
+                            assignmentCache.put(llave, assignment);
+                            assignmentsNuevos.add(assignment);
+
+                            // 3️⃣ Incrementar capacidad usada en la instancia
+                            instancia.setCapacidadUsada(instancia.getCapacidadUsada() + 1);
+                        }
+                        productosRastreados++;
+                    }
+                }
+            }
+        }
+        fuenteDatos.guadarInstanciasVuelos(instanciasNuevas);
+        fuenteDatos.guardarAsignacionesProductos(assignmentsNuevos);
+
+        System.out.println("✓ Productos rastreados y persistidos: " + productosRastreados);
+    }
+    private String buildInstanciaVueloId(Vuelo vuelo, LocalDateTime horaSalida, LocalDateTime T0) {
+        int dayOffset = (int) ChronoUnit.DAYS.between(T0.toLocalDate().atStartOfDay(),
+                horaSalida.toLocalDate().atStartOfDay());
+        String hhmm = String.format("%02d%02d", horaSalida.getHour(), horaSalida.getMinute());
+        return "FL-" + vuelo.getId() + "-DAY-" + dayOffset + "-" + hhmm;
+    }
+    private int calcularCapacidadUsada(String instanciaId) {
+        for (Map.Entry<String, ProductAssignment> entry : assignmentCache.entrySet()) {
+            ProductAssignment assignment = entry.getValue();
+            if (assignment.getFlightInstanceId().equals(instanciaId)) {
+                assignment.; // cada producto cuenta como 1 unidad
+            }
+        }
+
+        return capacidadUsada;
     }
 
     private List<Pedido> expandirPaquetesAUnidadesProducto(List<Pedido> pedidosOriginales) {

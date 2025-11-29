@@ -1,16 +1,10 @@
 package com.grupo5e.morapack.algorithm.input;
 
+import com.grupo5e.morapack.algorithm.alns.TramoConTiempo;
 import com.grupo5e.morapack.core.enums.EstadoProducto;
-import com.grupo5e.morapack.core.model.Aeropuerto;
-import com.grupo5e.morapack.core.model.Cancelacion;
-import com.grupo5e.morapack.core.model.Pedido;
-import com.grupo5e.morapack.core.model.Producto;
-import com.grupo5e.morapack.core.model.Vuelo;
-import com.grupo5e.morapack.repository.AeropuertoRepository;
-import com.grupo5e.morapack.repository.CancelacionRepository;
-import com.grupo5e.morapack.repository.PedidoRepository;
-import com.grupo5e.morapack.repository.ProductoRepository;
-import com.grupo5e.morapack.repository.VueloRepository;
+import com.grupo5e.morapack.core.model.*;
+import com.grupo5e.morapack.repository.*;
+import com.grupo5e.morapack.service.ProductAssignmentService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -48,6 +42,16 @@ public class FuenteDatosBaseDatos implements FuenteDatosInput {
     
     @Autowired
     private ProductoRepository productoRepository;
+
+    @Autowired
+    private InstanciaVueloRepository instanciaVueloRepository;
+
+    @Autowired
+    private ProductAssignmentService productAssignmentService;
+
+    @Autowired
+    private ProductAssignmentRepository productAssignmentRepository;
+
     @Override
     public void inicializar() {
         // Spring ya inicializó los repositories
@@ -91,8 +95,9 @@ public class FuenteDatosBaseDatos implements FuenteDatosInput {
     @Override
     @Transactional(readOnly = true)
     public List<Vuelo> cargarVuelos(List<Aeropuerto> aeropuertos) {
+        //Inicialmente se cargan todos los vuelos de tipo de data 1 (real)
         try {
-            //List<Vuelo> vuelos = vueloRepository.findAll();
+            //Lees solo los vuelos de tipo data 1 (reales) y que esten disponibles y no en vuelo o cancelados
             List<Vuelo> vuelos = vueloRepository.listarPorTipoData(1);
             // ✅ Forzar inicialización de relaciones LAZY
             // La anotación @Transactional mantiene la sesión de Hibernate abierta
@@ -215,9 +220,15 @@ public class FuenteDatosBaseDatos implements FuenteDatosInput {
             LocalDateTime horaInicio,
             LocalDateTime horaFin,
             int tipoData) {
+        //tipo data 1 = diario (ventana 1 hora)
+        //tipo data 0 = semanal (ventana 7 dias)
+        //tipo data 2 = colapso (ventana X dias)
+
         if(tipoData == 1){
-            horaFin = horaInicio;
-            horaInicio = horaFin.minusDays(1);
+            //Se capturan pedidos de la última hora
+            //ventana de 1 hora: 10am - 11am -> pedidos de 9am - 10am
+            horaFin = horaFin.minusHours(1);
+            horaInicio = horaFin.minusHours(1);
         }
         try {
             System.out.println("========================================");
@@ -275,7 +286,46 @@ public class FuenteDatosBaseDatos implements FuenteDatosInput {
             return List.of();
         }
     }
-    
+
+    @Override
+    public String cargarInstanciaVuelo(TramoConTiempo tramo) {
+        return "";
+    }
+
+    @Override
+    public Map<String, InstanciaVuelo> inicializarCacheinstancia() {
+        Map<String, InstanciaVuelo> cache = new HashMap<>();
+        List<InstanciaVuelo> instancias = instanciaVueloRepository.findAll();
+        for (InstanciaVuelo instancia : instancias) {
+            cache.put(instancia.getIdInstancia(), instancia);
+        }
+        return cache;
+    }
+
+    @Override
+    public Map<String, ProductAssignment> inicializarCacheAsignacion() {
+        Map<String, ProductAssignment> cache = new HashMap<>();
+        List<ProductAssignment> assignments =
+                productAssignmentRepository.pedidosEnAlmacen();
+        for (ProductAssignment assignment : assignments) {
+            String key = assignment.getProductoId() + "-" + assignment.getFlightInstanceId();
+            cache.put(key, assignment);
+        }
+        return cache;
+    }
+
+    @Override
+    public void guardarAsignacionesProductos(List<ProductAssignment> asignaciones) {
+        for (ProductAssignment asignacion : asignaciones) {
+            productAssignmentService.save(asignacion);
+        }
+    }
+
+    @Override
+    public void guadarInstanciasVuelos(List<InstanciaVuelo> instancias) {
+        instanciaVueloRepository.saveAll(instancias);
+    }
+
     /**
      * Carga asignaciones de productos existentes para soporte de re-ejecución.
      * CRÍTICO: Permite que ventanas consecutivas construyan sobre asignaciones previas.
@@ -378,4 +428,5 @@ public class FuenteDatosBaseDatos implements FuenteDatosInput {
             return new HashMap<>(); // Retornar mapa vacío en caso de error
         }
     }
+
 }

@@ -1,5 +1,6 @@
 package com.grupo5e.morapack.core.model;
 
+import com.grupo5e.morapack.core.enums.EstadoInstanciaVuelo;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -39,7 +40,7 @@ public class InstanciaVuelo {
     private LocalDateTime fechaHoraLlegada;
     
     @Column(name = "dia_instancia", nullable = false)
-    private Integer diaInstancia;
+    private Integer diaInstancia; //???
     
     @Column(name = "capacidad_maxima", nullable = false)
     private Integer capacidadMaxima;
@@ -47,7 +48,11 @@ public class InstanciaVuelo {
     @Column(name = "capacidad_usada", nullable = false)
     @Builder.Default
     private Integer capacidadUsada = 0;
-    
+
+    @Column(name = "estado_instancia", nullable = false)
+    @Enumerated(EnumType.STRING)
+    private EstadoInstanciaVuelo estadoInstancia;
+
     /**
      * Genera un ID único para esta instancia de vuelo.
      * Formato: "FL-{vueloId}-DAY-{day}-{HHmm}"

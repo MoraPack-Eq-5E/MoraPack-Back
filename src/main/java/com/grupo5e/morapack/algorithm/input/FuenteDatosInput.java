@@ -7,6 +7,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Interfaz para abstraer las fuentes de datos del algoritmo ALNS.
@@ -88,6 +89,6 @@ public interface FuenteDatosInput {
     Map<String, ProductAssignment> inicializarCacheAsignacion();
 
     void guardarAsignacionesProductos(List<ProductAssignment> asignaciones);
-    void guadarInstanciasVuelos(List<InstanciaVuelo> instancias);
+    void guardarOActualizarInstanciasVuelos(Set<InstanciaVuelo> instancias);
 }
 

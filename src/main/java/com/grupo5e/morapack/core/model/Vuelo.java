@@ -9,6 +9,7 @@ import lombok.Setter;
 import com.grupo5e.morapack.core.enums.EstadoVuelo;
 
 //import java.sql.Time;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -81,4 +82,23 @@ public class Vuelo {
             horaSalida.getMinute()
         );
     }
+
+    public LocalDateTime calcularSiguienteSalidaDesde(LocalDateTime referencia) {
+        LocalTime horaSalida = this.getHoraSalida(); // hora programada diaria
+
+        // Candidato: hoy a la hora del vuelo
+        LocalDateTime candidato = referencia
+                .withHour(horaSalida.getHour())
+                .withMinute(horaSalida.getMinute())
+                .withSecond(0)
+                .withNano(0);
+
+        // Si el vuelo de hoy ya pasó → usar mañana
+        if (!candidato.isAfter(referencia)) {
+            candidato = candidato.plusDays(1);
+        }
+
+        return candidato;
+    }
+
 }

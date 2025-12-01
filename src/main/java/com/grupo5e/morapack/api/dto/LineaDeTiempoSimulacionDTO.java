@@ -44,5 +44,7 @@ public class LineaDeTiempoSimulacionDTO {
     
     @Schema(description = "Total de aeropuertos involucrados")
     private Integer totalAeropuertos;
+
+
 }
 

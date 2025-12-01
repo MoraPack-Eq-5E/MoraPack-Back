@@ -5,6 +5,7 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.time.LocalDateTime;
+import java.util.Objects;
 
 /**
  * Representa una instancia específica de un vuelo en un día/hora particular.
@@ -53,6 +54,29 @@ public class InstanciaVuelo {
     @Enumerated(EnumType.STRING)
     private EstadoInstanciaVuelo estadoInstancia;
 
+    private int productosAsignados;
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof InstanciaVuelo)) return false;
+        InstanciaVuelo that = (InstanciaVuelo) o;
+        return Objects.equals(idInstancia, that.idInstancia);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(idInstancia);
+    }
+    public InstanciaVuelo(String instanciaId,Vuelo vuelo,LocalDateTime horaSalidaReal,LocalDateTime horaLlegadaReal){
+        this.idInstancia = instanciaId;
+        this.vueloBase = vuelo;
+        this.fechaHoraSalida = horaSalidaReal;
+        this.fechaHoraLlegada = horaLlegadaReal;
+        this.capacidadMaxima = vuelo.getCapacidadMaxima();
+        this.capacidadUsada = 0;
+        this.estadoInstancia = EstadoInstanciaVuelo.PLANIFICADO;
+    }
     /**
      * Genera un ID único para esta instancia de vuelo.
      * Formato: "FL-{vueloId}-DAY-{day}-{HHmm}"

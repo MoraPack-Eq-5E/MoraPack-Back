@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Implementación de FuenteDatosInput que lee desde archivos .txt
@@ -104,7 +105,7 @@ public class FuenteDatosArchivo implements FuenteDatosInput {
     }
 
     @Override
-    public void guadarInstanciasVuelos(List<InstanciaVuelo> instancias) {
+    public void guardarOActualizarInstanciasVuelos(Set<InstanciaVuelo> instancias) {
 
     }
 

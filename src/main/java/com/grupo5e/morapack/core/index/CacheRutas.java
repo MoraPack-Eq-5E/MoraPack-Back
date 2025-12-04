@@ -3,9 +3,9 @@ package com.grupo5e.morapack.core.index;
 import com.grupo5e.morapack.core.model.Vuelo;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Cache de rutas precalculadas para evitar búsquedas repetidas.
@@ -17,76 +17,78 @@ import java.util.Map;
  * Patrón: Memoization Pattern
  */
 public class CacheRutas {
-    
+
     // Cache: "ORIGEN-DESTINO-DIA" → Lista de rutas válidas encontradas
     private final Map<String, List<ArrayList<Vuelo>>> cacheRutasCalculadas;
-    
+
     // Estadísticas
     private int hits = 0;
     private int misses = 0;
     private int rutasGuardadas = 0;
-    
+
     /**
      * Constructor del cache de rutas.
+     * OPTIMIZACIÓN: Usa ConcurrentHashMap para mejor rendimiento con muchas
+     * entradas.
      */
     public CacheRutas() {
-        this.cacheRutasCalculadas = new HashMap<>();
+        this.cacheRutasCalculadas = new ConcurrentHashMap<>();
     }
-    
+
     /**
      * Obtiene rutas precalculadas para un par origen-destino en un día específico.
      * 
-     * @param origen Código IATA del aeropuerto de origen
+     * @param origen  Código IATA del aeropuerto de origen
      * @param destino Código IATA del aeropuerto de destino
-     * @param dia Día de operación (1-based)
+     * @param dia     Día de operación (1-based)
      * @return Lista de rutas válidas, o null si no está en cache
      */
     public List<ArrayList<Vuelo>> obtenerRutasCalculadas(String origen, String destino, int dia) {
         String clave = generarClave(origen, destino, dia);
         List<ArrayList<Vuelo>> rutas = cacheRutasCalculadas.get(clave);
-        
+
         if (rutas != null) {
             hits++;
             // Retornar copia defensiva para proteger el cache
             return new ArrayList<>(rutas);
         }
-        
+
         misses++;
         return null; // Cache miss
     }
-    
+
     /**
      * Guarda rutas calculadas en el cache.
      * 
-     * @param origen Código IATA del aeropuerto de origen
+     * @param origen  Código IATA del aeropuerto de origen
      * @param destino Código IATA del aeropuerto de destino
-     * @param dia Día de operación (1-based)
-     * @param rutas Lista de rutas válidas encontradas
+     * @param dia     Día de operación (1-based)
+     * @param rutas   Lista de rutas válidas encontradas
      */
     public void guardarRutas(String origen, String destino, int dia, List<ArrayList<Vuelo>> rutas) {
         if (rutas == null || rutas.isEmpty()) {
             return; // No guardar rutas vacías
         }
-        
+
         String clave = generarClave(origen, destino, dia);
         // Guardar copia defensiva para proteger el cache
         cacheRutasCalculadas.put(clave, new ArrayList<>(rutas));
         rutasGuardadas++;
     }
-    
+
     /**
      * Genera la clave única para el cache.
      * Formato: "ORIGEN-DESTINO-DIA"
      * 
-     * @param origen Código IATA del aeropuerto de origen
+     * @param origen  Código IATA del aeropuerto de origen
      * @param destino Código IATA del aeropuerto de destino
-     * @param dia Día de operación
+     * @param dia     Día de operación
      * @return Clave única para el cache
      */
     private String generarClave(String origen, String destino, int dia) {
         return origen + "-" + destino + "-" + dia;
     }
-    
+
     /**
      * Limpia el cache completamente.
      * Útil para reiniciar el cache entre iteraciones del algoritmo.
@@ -95,7 +97,7 @@ public class CacheRutas {
         cacheRutasCalculadas.clear();
         resetearEstadisticas();
     }
-    
+
     /**
      * Limpia rutas para días anteriores al día actual.
      * Útil para gestión de memoria en ejecuciones largas.
@@ -116,9 +118,9 @@ public class CacheRutas {
             return false;
         });
     }
-    
+
     // ========== Estadísticas ==========
-    
+
     /**
      * Obtiene la tasa de aciertos del cache (hit rate).
      * 
@@ -126,10 +128,11 @@ public class CacheRutas {
      */
     public double getHitRate() {
         int total = hits + misses;
-        if (total == 0) return 0.0;
+        if (total == 0)
+            return 0.0;
         return (double) hits / total;
     }
-    
+
     /**
      * Obtiene el número total de entradas en cache.
      * 
@@ -138,7 +141,7 @@ public class CacheRutas {
     public int getTotalEntradas() {
         return cacheRutasCalculadas.size();
     }
-    
+
     /**
      * Resetea las estadísticas del cache.
      */
@@ -147,7 +150,7 @@ public class CacheRutas {
         misses = 0;
         rutasGuardadas = 0;
     }
-    
+
     /**
      * Imprime estadísticas del cache para debugging.
      */
@@ -161,4 +164,3 @@ public class CacheRutas {
         System.out.println("======================================");
     }
 }
-

@@ -64,7 +64,9 @@ public class ALNSDestruction {
     }
 
     private static int productosDe(Pedido pedido) {
-        return (pedido.getProductos() != null && !pedido.getProductos().isEmpty()) ? pedido.getProductos().size() : 1;
+        // OPTIMIZADO: Usar getCantidadProductosRapido() para evitar cargar productos
+        // LAZY
+        return pedido.getCantidadProductosRapido();
     }
 
     /**

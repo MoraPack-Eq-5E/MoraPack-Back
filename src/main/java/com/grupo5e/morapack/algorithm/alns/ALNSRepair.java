@@ -118,8 +118,10 @@ public class ALNSRepair {
                 return comparacionUrgencia;
 
             // 2. Priorizar paquetes con más productos (mayor valor de negocio)
-            int productos1 = p1.getProductos() != null ? p1.getProductos().size() : 1;
-            int productos2 = p2.getProductos() != null ? p2.getProductos().size() : 1;
+            // OPTIMIZADO: Usar getCantidadProductosRapido() para evitar
+            // LazyInitializationException
+            int productos1 = p1.getCantidadProductosRapido();
+            int productos2 = p2.getCantidadProductosRapido();
             int comparacionProductos = Integer.compare(productos2, productos1);
             if (comparacionProductos != 0)
                 return comparacionProductos;
@@ -143,7 +145,8 @@ public class ALNSRepair {
             Aeropuerto aeropuertoDestino = obtenerAeropuerto(pedido.getAeropuertoDestinoCodigo());
 
             // Obtener conteo de productos para este pedido
-            int conteoProductos = pedido.getProductos() != null ? pedido.getProductos().size() : 1;
+            // OPTIMIZADO: Usar getCantidadProductosRapido()
+            int conteoProductos = pedido.getCantidadProductosRapido();
             // System.out.println("Productos: " + conteoProductos);
 
             // Verificar capacidad del almacén
@@ -223,7 +226,7 @@ public class ALNSRepair {
             // Calcular arrepentimiento para cada paquete restante
             for (Pedido pedido : paquetesRestantes) {
                 Aeropuerto aeropuertoDestino = obtenerAeropuerto(pedido.getAeropuertoDestinoCodigo());
-                int conteoProductos = pedido.getProductos() != null ? pedido.getProductos().size() : 1;
+                int conteoProductos = pedido.getCantidadProductosRapido();
 
                 if (aeropuertoDestino == null) {
                     System.out.println("❌ Aeropuerto destino no encontrado para pedido: " + pedido.getId() + " "
@@ -278,9 +281,9 @@ public class ALNSRepair {
 
             // Insertar el paquete con mayor arrepentimiento
             if (mejorPedido != null && mejorRuta != null && esRutaValida(mejorPedido, mejorRuta,
-                    Math.max(1, mejorPedido.getProductos() != null ? mejorPedido.getProductos().size() : 1))) {
+                    Math.max(1, mejorPedido.getCantidadProductosRapido()))) {
                 solucionReparada.put(mejorPedido, mejorRuta);
-                int conteoProductos = mejorPedido.getProductos() != null ? mejorPedido.getProductos().size() : 1;
+                int conteoProductos = mejorPedido.getCantidadProductosRapido();
                 actualizarCapacidadesVuelos(mejorRuta, conteoProductos);
                 actualizarCapacidadAeropuertos(mejorPedido.getAeropuertoDestinoCodigo(), conteoProductos);
                 paquetesRestantes.remove(mejorPedido);
@@ -525,7 +528,7 @@ public class ALNSRepair {
                         + pedido.getAeropuertoDestinoCodigo());
                 exit(1);
             }
-            int conteoProductos = pedido.getProductos() != null ? pedido.getProductos().size() : 1;
+            int conteoProductos = pedido.getCantidadProductosRapido();
 
             if (!tieneCapacidadAlmacen(aeropuertoDestino, conteoProductos)) {
                 paquetesNoAsignados.add(pedido);
@@ -754,7 +757,7 @@ public class ALNSRepair {
 
         for (Pedido pedido : paquetesParaReparar) {
             Aeropuerto aeropuertoDestino = obtenerAeropuerto(pedido.getAeropuertoDestinoCodigo());
-            int conteoProductos = pedido.getProductos() != null ? pedido.getProductos().size() : 1;
+            int conteoProductos = pedido.getCantidadProductosRapido();
 
             if (aeropuertoDestino == null) {
                 System.out.println("❌ Aeropuerto destino no encontrado para pedido: " + pedido.getId() + " "
@@ -1309,11 +1312,10 @@ public class ALNSRepair {
     // }
     /**
      * PATCH: Versión original que delega calculando cantidad
+     * OPTIMIZADO: Usar getCantidadProductosRapido()
      */
     private boolean esRutaValida(Pedido pedido, ArrayList<Vuelo> ruta) {
-        int cantidad = (pedido.getProductos() != null && !pedido.getProductos().isEmpty())
-                ? pedido.getProductos().size()
-                : 1;
+        int cantidad = pedido.getCantidadProductosRapido();
         return esRutaValida(pedido, ruta, cantidad);
     }
 

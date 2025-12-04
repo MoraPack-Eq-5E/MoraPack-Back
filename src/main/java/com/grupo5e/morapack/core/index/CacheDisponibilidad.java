@@ -4,10 +4,13 @@ import com.grupo5e.morapack.core.model.Aeropuerto;
 import com.grupo5e.morapack.core.model.Vuelo;
 import com.grupo5e.morapack.core.service.ServicioDisponibilidadVuelos;
 
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 /**
  * Cache de vuelos disponibles por día.
@@ -36,10 +39,13 @@ public class CacheDisponibilidad {
      * @param servicio Servicio de disponibilidad para verificar cancelaciones
      * @param indice   Índice de vuelos para búsqueda eficiente
      */
+    /**
+     * OPTIMIZACIÓN: Usa ConcurrentHashMap para mejor rendimiento.
+     */
     public CacheDisponibilidad(ServicioDisponibilidadVuelos servicio, IndiceVuelos indice) {
         this.servicioDisponibilidad = servicio;
         this.indiceVuelos = indice;
-        this.cachePorDia = new HashMap<>();
+        this.cachePorDia = new ConcurrentHashMap<>();
     }
 
     /**
@@ -81,8 +87,8 @@ public class CacheDisponibilidad {
                 .filter(v -> servicioDisponibilidad.estaDisponible(v, dia))
                 .collect(Collectors.toList());
 
-        // Guardar en cache
-        cachePorDia.computeIfAbsent(dia, k -> new HashMap<>())
+        // Guardar en cache (OPTIMIZADO: usar ConcurrentHashMap interno)
+        cachePorDia.computeIfAbsent(dia, k -> new ConcurrentHashMap<>())
                 .put(claveRuta, disponibles);
 
         // CRÍTICO: Retornar copia inmutable para proteger el cache
@@ -97,13 +103,16 @@ public class CacheDisponibilidad {
      * @param aeropuertos Lista de aeropuertos para resolver códigos IATA
      */
     public void precalcularDias(int numDias, Map<String, Aeropuerto> aeropuertos) {
-        System.out.println("Precalculando cache de disponibilidad para " + numDias + " días...");
+        System.out.println("Precalculando cache de disponibilidad para " + numDias + " días (paralelo)...");
         long startTime = System.currentTimeMillis();
 
-        int rutasCalculadas = 0;
-        for (int dia = 1; dia <= numDias; dia++) {
-            // Pre-cachear todas las rutas del índice
-            for (String claveRuta : indiceVuelos.obtenerTodasClaves()) {
+        // OPTIMIZACIÓN: Pre-calcular en paralelo por días
+        Set<String> clavesRutas = indiceVuelos.obtenerTodasClaves();
+        AtomicInteger rutasCalculadas = new AtomicInteger(0);
+
+        IntStream.rangeClosed(1, numDias).parallel().forEach(dia -> {
+            // Pre-cachear todas las rutas del índice para este día
+            for (String claveRuta : clavesRutas) {
                 String[] partes = claveRuta.split("-");
                 if (partes.length != 2)
                     continue;
@@ -113,17 +122,17 @@ public class CacheDisponibilidad {
 
                 if (origen != null && destino != null) {
                     obtenerVuelosDisponibles(origen, destino, dia);
-                    rutasCalculadas++;
+                    rutasCalculadas.incrementAndGet();
                 }
             }
-        }
+        });
 
         long endTime = System.currentTimeMillis();
         double segundos = (endTime - startTime) / 1000.0;
 
         System.out.println(String.format(
                 "✓ Cache precalculado: %d rutas×días en %.2fs (%d entradas totales, hit rate esperado: 95%%+)",
-                indiceVuelos.obtenerTodasClaves().size(),
+                clavesRutas.size(),
                 segundos,
                 getTotalEntradasCache()));
     }

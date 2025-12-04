@@ -249,8 +249,14 @@ public class ALNSSolver {
         inicializarOptimizaciones();
 
         // 10. OPTIMIZACIÓN: Pre-cargar cache de disponibilidad (warm-up)
+        // Usar horizonte dinámico calculado para mejor cobertura
         if (cacheDisponibilidad != null) {
-            cacheDisponibilidad.precalcularDias(7, cacheCodigoIATAAeropuerto);
+            int diasPrecalculo = Math.max(this.horizonteDias, 7);
+            System.out.println("⚡ Pre-calentando cache de disponibilidad para " + diasPrecalculo + " días...");
+            long startWarmup = System.currentTimeMillis();
+            cacheDisponibilidad.precalcularDias(diasPrecalculo, cacheCodigoIATAAeropuerto);
+            long warmupTime = System.currentTimeMillis() - startWarmup;
+            System.out.println("✅ Cache precalculado en " + warmupTime + "ms");
         }
 
         System.out.println("ALNS Solver inicializado correctamente");
@@ -434,8 +440,8 @@ public class ALNSSolver {
         System.out.println("Pedidos leídos: " + this.pedidos.size());
 
         // Contar productos totales (cada pedido puede tener múltiples productos)
-        // OPTIMIZADO: Usar getCantidadProductosRapido() para evitar cargar lista LAZY
-        int totalProductos = this.pedidos.stream()
+        // OPTIMIZADO: Usar parallelStream + getCantidadProductosRapido()
+        int totalProductos = this.pedidos.parallelStream()
                 .mapToInt(Pedido::getCantidadProductosRapido)
                 .sum();
         System.out.println("Productos totales: " + totalProductos);
@@ -1498,7 +1504,8 @@ public class ALNSSolver {
         T0 = LocalDateTime.now();
 
         if (pedidos != null && !pedidos.isEmpty()) {
-            LocalDateTime minFechaPedido = pedidos.stream()
+            // OPTIMIZADO: parallelStream para grandes volúmenes de pedidos
+            LocalDateTime minFechaPedido = pedidos.parallelStream()
                     .filter(p -> p.getFechaPedido() != null)
                     .map(Pedido::getFechaPedido)
                     .min(LocalDateTime::compareTo)
@@ -1514,7 +1521,8 @@ public class ALNSSolver {
             return Constantes.HORIZON_DAYS_MIN;
         }
 
-        LocalDateTime maxDeadline = pedidos.stream()
+        // OPTIMIZADO: parallelStream para grandes volúmenes de pedidos
+        LocalDateTime maxDeadline = pedidos.parallelStream()
                 .filter(p -> p.getFechaLimiteEntrega() != null)
                 .map(Pedido::getFechaLimiteEntrega)
                 .max(LocalDateTime::compareTo)
@@ -2410,13 +2418,16 @@ public class ALNSSolver {
         // Generar lista de aeropuertos intermedios únicos
         // IMPORTANTE: Excluir almacenes principales como escalas (Lima, Bruselas, Baku)
         // ya que son puntos de origen, no de tránsito
+        // OPTIMIZACIÓN: Usar HashSet para búsqueda O(1) en lugar de O(n)
+        Set<Aeropuerto> posiblesSet = new HashSet<>();
         ArrayList<Aeropuerto> posibles = new ArrayList<>();
         for (Vuelo v : vuelosSalidaOrigen) {
             Aeropuerto destVuelo = v.getAeropuertoDestino();
-            if (!destVuelo.equals(aDestino) && !posibles.contains(destVuelo)) {
+            if (!destVuelo.equals(aDestino) && !posiblesSet.contains(destVuelo)) {
                 // No usar almacenes principales como escala
                 String nombreCiudad = destVuelo.getCiudad() != null ? destVuelo.getCiudad().getNombre() : null;
                 if (!Constantes.esAlmacenPrincipal(nombreCiudad)) {
+                    posiblesSet.add(destVuelo);
                     posibles.add(destVuelo);
                 }
             }
@@ -2508,13 +2519,16 @@ public class ALNSSolver {
 
         // OPTIMIZACIÓN: Obtener aeropuertos alcanzables desde origen
         // IMPORTANTE: Excluir almacenes principales como escalas
+        // OPTIMIZACIÓN: Usar HashSet para búsqueda O(1) en lugar de O(n)
         List<Vuelo> vuelosSalidaOrigen = indiceVuelos.obtenerVuelosSalientes(aOrigen);
+        Set<Aeropuerto> primerasSet = new HashSet<>();
         ArrayList<Aeropuerto> primeras = new ArrayList<>();
         for (Vuelo v : vuelosSalidaOrigen) {
             Aeropuerto destVuelo = v.getAeropuertoDestino();
-            if (!destVuelo.equals(aDestino) && !primeras.contains(destVuelo)) {
+            if (!destVuelo.equals(aDestino) && !primerasSet.contains(destVuelo)) {
                 String nombreCiudad = destVuelo.getCiudad() != null ? destVuelo.getCiudad().getNombre() : null;
                 if (!Constantes.esAlmacenPrincipal(nombreCiudad)) {
+                    primerasSet.add(destVuelo);
                     primeras.add(destVuelo);
                 }
             }
@@ -2539,14 +2553,17 @@ public class ALNSSolver {
 
             // OPTIMIZACIÓN: Obtener aeropuertos alcanzables desde p1
             // IMPORTANTE: Excluir almacenes principales como escalas
+            // OPTIMIZACIÓN: Usar HashSet para búsqueda O(1) en lugar de O(n)
             List<Vuelo> vuelosSalidaP1 = indiceVuelos.obtenerVuelosSalientes(p1);
+            Set<Aeropuerto> segundasSet = new HashSet<>();
             ArrayList<Aeropuerto> segundas = new ArrayList<>();
             for (Vuelo v : vuelosSalidaP1) {
                 Aeropuerto destVuelo = v.getAeropuertoDestino();
                 if (!destVuelo.equals(aOrigen) && !destVuelo.equals(aDestino) &&
-                        !destVuelo.equals(p1) && !segundas.contains(destVuelo)) {
+                        !destVuelo.equals(p1) && !segundasSet.contains(destVuelo)) {
                     String nombreCiudad = destVuelo.getCiudad() != null ? destVuelo.getCiudad().getNombre() : null;
                     if (!Constantes.esAlmacenPrincipal(nombreCiudad)) {
+                        segundasSet.add(destVuelo);
                         segundas.add(destVuelo);
                     }
                 }

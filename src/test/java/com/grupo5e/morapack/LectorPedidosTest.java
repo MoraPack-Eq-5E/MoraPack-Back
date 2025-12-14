@@ -80,7 +80,7 @@ public class LectorPedidosTest {
                     continue;
                 }
 
-                Cliente cliente = clienteService.buscarPorId(idCliente);
+                Cliente cliente = clienteService.buscarPorId(idCliente,0);
                 if (cliente == null) {
                     System.err.println("[WARN] Cliente no encontrado con ID: " + idCliente);
                     continue;

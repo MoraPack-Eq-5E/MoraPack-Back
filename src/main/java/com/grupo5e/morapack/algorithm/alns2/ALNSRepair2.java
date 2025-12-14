@@ -9,6 +9,7 @@ import com.grupo5e.morapack.core.model.*;
 import com.grupo5e.morapack.service.AeropuertoService;
 
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -1082,19 +1083,23 @@ public class ALNSRepair2 {
                 ProductAssignment assignment = new ProductAssignment();
                 assignment.setProductoId(producto.getId());
                 assignment.setPedidoId(pedido.getId());
-                assignment.setFlightInstanceId(instanciaId);
-                assignment.setHoraSalidaReal(tramo.getHoraSalidaReal());
-                assignment.setHoraLlegadaReal(tramo.getHoraLlegadaReal());
+                assignment.setInstanciaVuelo(instancia);
                 assignment.setEstadoProducto(EstadoProducto.PLANIFICADO);
                 assignmentCache.put(llave, assignment);
             }
         }
     }
     private String buildInstanciaVueloId(Vuelo vuelo, LocalDateTime horaSalida, LocalDateTime T0) {
-        int dayOffset = (int) ChronoUnit.DAYS.between(T0.toLocalDate().atStartOfDay(),
-                horaSalida.toLocalDate().atStartOfDay());
-        String hhmm = String.format("%02d%02d", horaSalida.getHour(), horaSalida.getMinute());
-        return "FL-" + vuelo.getId() + "-DAY-" + dayOffset + "-" + hhmm;
+        // 1. Definimos el formato para la fecha: AñoMesDia (yyyyMMdd)
+        DateTimeFormatter fechaFormatter = DateTimeFormatter.ofPattern("yyyyMMdd");
+
+        // 2. Definimos el formato para la hora: HoraMinuto (HHmm)
+        DateTimeFormatter horaFormatter = DateTimeFormatter.ofPattern("HHmm");
+
+        // 3. Construimos el String final concatenando las partes formateadas
+        return "FL-" + vuelo.getId() + "-" +
+                horaSalida.format(fechaFormatter) + "-" +
+                horaSalida.format(horaFormatter);
     }
     /**
      * NUEVO: Calcula los tiempos absolutos para una ruta de vuelos.

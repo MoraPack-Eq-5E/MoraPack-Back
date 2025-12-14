@@ -237,7 +237,7 @@ public class FuenteDatosBaseDatos implements FuenteDatosInput {
             long startTime = System.currentTimeMillis();
             
             // ⚡ OPTIMIZACIÓN 1: Query optimizada - solo pedidos en ventana
-            List<Pedido> pedidosTotales = pedidoRepository.findByFechaPedidoBetween(horaInicio, horaFin);
+            List<Pedido> pedidosTotales = pedidoRepository.findByFechaPedidoBetweenConProductos(horaInicio, horaFin);
             List<Pedido> pedidos = pedidosTotales.stream()
                     .filter(p -> p.getTipoData() == tipoData)
                     .collect(Collectors.toList());

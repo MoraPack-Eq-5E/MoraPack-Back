@@ -48,7 +48,7 @@ public class FabricaFuenteDatos {
         System.out.println("🏭 [FABRICA] System.getProperty('MODO_FUENTE_DATOS') = " + modo);
         
         if (modo == null) {
-            modo = "ARCHIVO"; // Modo por defecto
+            modo = "BASEDATOS"; // Modo por defecto
             System.out.println("🏭 [FABRICA] ⚠️ Modo era null, usando default: ARCHIVO");
         }
         

@@ -5,6 +5,8 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -12,25 +14,25 @@ import java.util.Objects;
  * 
  * Ejemplo:
  * - Vuelo LIM-CUZ sale diariamente a las 08:00
- * - InstanciaVuelo para Día 1: fechaHoraSalida = 2025-01-02T08:00
- * - InstanciaVuelo para Día 2: fechaHoraSalida = 2025-01-03T08:00
+ * - InstanciaVuelo de vuelo para la fecha -> fechaHoraSalida = 2025-01-02T08:00
+ * - InstanciaVuelo de vuelo para la fecha -> fechaHoraSalida = 2025-01-03T08:00
  * 
  * Esto permite tracking de capacidad por salida individual, no solo por ruta.
  */
 @Entity
-@Table(name = "instancias_vuelo")
 @Getter
 @Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@Table(name = "instancias_vuelo")
 public class InstanciaVuelo {
     
     @Id
     @Column(name = "id_instancia", length = 50)
-    private String idInstancia;  // "FL-{vueloId}-DAY-{day}-{HHmm}"
+    private String idInstancia;  // "FL-{vueloId}-{yyyyMMDD}-{HHmm}"
     
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "vuelo_base_id", nullable = false)
     private Vuelo vueloBase;
     
@@ -39,9 +41,6 @@ public class InstanciaVuelo {
     
     @Column(name = "fecha_hora_llegada", nullable = false)
     private LocalDateTime fechaHoraLlegada;
-    
-    @Column(name = "dia_instancia", nullable = false)
-    private Integer diaInstancia; //???
     
     @Column(name = "capacidad_maxima", nullable = false)
     private Integer capacidadMaxima;
@@ -54,7 +53,10 @@ public class InstanciaVuelo {
     @Enumerated(EnumType.STRING)
     private EstadoInstanciaVuelo estadoInstancia;
 
-    private int productosAsignados;
+    // Relación Inversa (Opcional pero útil):
+    // Te permite hacer instancia.getAsignaciones() para ver qué lleva cargado
+    @OneToMany(mappedBy = "instanciaVuelo", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
+    private List<ProductAssignment> asignaciones = new ArrayList<>();
 
     @Override
     public boolean equals(Object o) {
@@ -77,28 +79,6 @@ public class InstanciaVuelo {
         this.capacidadUsada = 0;
         this.estadoInstancia = EstadoInstanciaVuelo.PLANIFICADO;
     }
-    /**
-     * Genera un ID único para esta instancia de vuelo.
-     * Formato: "FL-{vueloId}-DAY-{day}-{HHmm}"
-     * 
-     * Ejemplo: "FL-45-DAY-0-0800" = Vuelo 45, Día 0, Salida 08:00
-     * 
-     * @return ID único de la instancia
-     */
-    public String generarIdInstancia() {
-        if (vueloBase == null || fechaHoraSalida == null || diaInstancia == null) {
-            throw new IllegalStateException("Cannot generate instance ID without vueloBase, fechaHoraSalida, and diaInstancia");
-        }
-        
-        this.idInstancia = String.format("FL-%d-DAY-%d-%02d%02d",
-            vueloBase.getId(),
-            diaInstancia,
-            fechaHoraSalida.getHour(),
-            fechaHoraSalida.getMinute()
-        );
-        return this.idInstancia;
-    }
-    
     /**
      * Verifica si esta instancia tiene capacidad disponible para la cantidad solicitada.
      * 

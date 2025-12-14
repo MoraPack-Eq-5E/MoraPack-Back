@@ -16,6 +16,7 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 
@@ -99,11 +100,14 @@ public class ALNSSolver2 implements CapacidadInstanciasManager {
     private static final boolean DEBUG_MODE = false;
 
     private int tipoData;
-    @Getter
     private Map<String, InstanciaVuelo> instanciaCache;
     private Map<String, InstanciaVuelo> instanciaCacheBase;
-    @Getter
     private Map<String, ProductAssignment> assignmentCache;
+
+    @Getter
+    Set<InstanciaVuelo> instancias;
+    @Getter
+    List<ProductAssignment> assignmentsNuevos;
     /**
      * Constructor principal simplificado que usa FuenteDatosInput modular.
      * Permite ejecutar el algoritmo sin dependencias de Spring.
@@ -148,6 +152,7 @@ public class ALNSSolver2 implements CapacidadInstanciasManager {
         this.vuelos = new ArrayList<>(fuenteDatos.cargarVuelos(this.aeropuertos));
         this.instanciaCache = new HashMap<>(fuenteDatos.inicializarCacheinstancia());
         this.instanciaCacheBase = instanciaCache;
+        this.assignmentCache = new HashMap<>();
         // CRÍTICO: Cargar pedidos con filtrado de tiempo si se especifica
         if (horaInicio != null && horaFin != null) {
             this.pedidosOriginales = new ArrayList<>(
@@ -191,9 +196,9 @@ public class ALNSSolver2 implements CapacidadInstanciasManager {
         }
 
         // 4. Inicializar ProductTracker para seguimiento a nivel de producto
-        this.productTracker = new ProductTracker();
-        this.productTracker.initializeFromOrders(this.pedidos);
-        System.out.println("ProductTracker inicializado con " + this.pedidos.size() + " pedidos");
+//        this.productTracker = new ProductTracker();
+//        this.productTracker.initializeFromOrders(this.pedidos);
+//        System.out.println("ProductTracker inicializado con " + this.pedidos.size() + " pedidos");
 
         // 5. Estructuras base
         this.solucion = new HashMap<>();
@@ -457,13 +462,13 @@ public class ALNSSolver2 implements CapacidadInstanciasManager {
     void guardarInstanciasBD(FuenteDatosInput fuenteDatos){
         System.out.println("\n=== GUARDANDO INSTANCIAS EN BD ===");
         //Agarrar todas las instancias de Map<String, InstanciaVuelo> instanciaCache;
-        Set<InstanciaVuelo> instancias = new HashSet<>(instanciaCache.values());
+        instancias = new HashSet<>(instanciaCache.values());
         fuenteDatos.guardarOActualizarInstanciasVuelos(instancias);
         System.out.println("✓ Instancias de vuelo creadas o actualizadas: " + instancias.size());
     }
     void guardarProductosAssigmentBD(FuenteDatosInput fuenteDatos){
         System.out.println("\n=== GUARDANDO ASSIGMENT PRODUCTS EN BD ===");
-        List<ProductAssignment> assignmentsNuevos = new ArrayList<>();
+        assignmentsNuevos = new ArrayList<>();
         //Agarrar todos los pedidos con sus productos de Map<String, ProductAssignment> assignmentCache;
         // Recorrer todo el assignmentCache (key = productId, value = ProductAssignment)
         for (ProductAssignment pa : assignmentCache.values()) {
@@ -1120,7 +1125,7 @@ public class ALNSSolver2 implements CapacidadInstanciasManager {
         System.out.println("Híbrido: Manteniendo " + mantener + " mejores pedidos, regenerando "
                 + (solucionActual.size() - mantener));
 
-        reconstruirCapacidadesDesdeSolucion(nuevaSolucion); // VUELOS
+        reconstruirCapacidadesDesdeSolucion(nuevaSolucion); // isntancias de vuelo
         reconstruirAlmacenesDesdeSolucion(nuevaSolucion); // AEROPUERTOS
 
         return nuevaSolucion;
@@ -1312,20 +1317,6 @@ public class ALNSSolver2 implements CapacidadInstanciasManager {
             }
         }
     }
-
-    private Map<Vuelo, Integer> crearSnapshotCapacidadesVuelos() {
-        Map<Vuelo, Integer> snapshot = new HashMap<>();
-        for (Vuelo f : vuelos) {
-            snapshot.put(f, f.getCapacidadUsada());
-        }
-        return snapshot;
-    }
-
-    private void restaurarVuelos(Map<Vuelo, Integer> snapshot) {
-        for (Vuelo f : vuelos) {
-            f.setCapacidadUsada(snapshot.getOrDefault(f, 0));
-        }
-    }
     //Reconstruir capacidades pero sin tomar en cuenta tiempos ya previamente calculados (ERROR)
     private void reconstruirCapacidadesDesdeSolucion(HashMap<Pedido, ArrayList<Vuelo>> solucion) {
 
@@ -1369,15 +1360,13 @@ public class ALNSSolver2 implements CapacidadInstanciasManager {
                         (instanciaId, i -> new InstanciaVuelo(i, vuelo, horaSalidaReal, horaLlegadaReal));
 
                 // Sumar la capacidad usada
-                instancia.setCapacidadUsada(instancia.getCapacidadUsada() + conteoProductos);
+                instancia.reservarCapacidad(conteoProductos);
                 for (Producto producto : pedido.getProductos()) {
                     ProductAssignment pa = new ProductAssignment();
                     pa.setProductoId(producto.getId());
                     pa.setPedidoId(pedido.getId());
-                    pa.setFlightInstanceId(instanciaId);
+                    pa.setInstanciaVuelo(instancia);
                     pa.setIndiceEnRuta(idx);
-                    pa.setHoraSalidaReal(horaSalidaReal);
-                    pa.setHoraLlegadaReal(horaLlegadaReal);
                     pa.setEstadoProducto(EstadoProducto.PLANIFICADO);
 
                     assignmentCache.put(
@@ -1691,10 +1680,16 @@ public class ALNSSolver2 implements CapacidadInstanciasManager {
         return salidaHoy;
     }
     private String buildInstanciaVueloId(Vuelo vuelo, LocalDateTime horaSalida, LocalDateTime T0) {
-        int dayOffset = (int) ChronoUnit.DAYS.between(T0.toLocalDate().atStartOfDay(),
-                horaSalida.toLocalDate().atStartOfDay());
-        String hhmm = String.format("%02d%02d", horaSalida.getHour(), horaSalida.getMinute());
-        return "FL-" + vuelo.getId() + "-DAY-" + dayOffset + "-" + hhmm;
+        // 1. Definimos el formato para la fecha: AñoMesDia (yyyyMMdd)
+        DateTimeFormatter fechaFormatter = DateTimeFormatter.ofPattern("yyyyMMdd");
+
+        // 2. Definimos el formato para la hora: HoraMinuto (HHmm)
+        DateTimeFormatter horaFormatter = DateTimeFormatter.ofPattern("HHmm");
+
+        // 3. Construimos el String final concatenando las partes formateadas
+        return "FL-" + vuelo.getId() + "-" +
+                horaSalida.format(fechaFormatter) + "-" +
+                horaSalida.format(horaFormatter);
     }
 
     private List<Pedido> expandirPaquetesAUnidadesProducto(List<Pedido> pedidosOriginales) {
@@ -1961,8 +1956,8 @@ public class ALNSSolver2 implements CapacidadInstanciasManager {
         if (assignmentCache == null) return;
 
         assignmentCache.entrySet().removeIf(e ->
-                e.getValue().getFlightInstanceId().equals(instanciaId)
-                        && e.getValue().getPedidoId().equals(pedido.getId().intValue())
+                e.getValue().getInstanciaVuelo().getIdInstancia().equals(instanciaId)
+                        && e.getValue().getPedidoId().equals(pedido.getId())
         );
     }
 
@@ -1994,9 +1989,9 @@ public class ALNSSolver2 implements CapacidadInstanciasManager {
         }
 
         int cantidadProductos = pedido.getCantidadProductosRapido();
-
+        List<Producto> productos = pedido.getProductos();
         // Por cada producto del pedido
-        for (int productoIndex = 1; productoIndex <= cantidadProductos; productoIndex++) {
+        for (Producto prod : productos) {
 
             // Asignación del producto a cada tramo
             for (TramoConTiempo tramo : rutaConTiempos.getTramos()) {
@@ -2006,18 +2001,16 @@ public class ALNSSolver2 implements CapacidadInstanciasManager {
                         tramo.getHoraSalidaReal(),
                         T0 // o diaOperacion
                 );
-
+                InstanciaVuelo instancia= instanciaCache.get(instanciaId);
                 ProductAssignment pa = new ProductAssignment();
-                pa.setProductoId(productoIndex);               // ID del producto dentro del pedido
-                pa.setPedidoId(pedido.getId().intValue());     // ID del pedido
-                pa.setFlightInstanceId(instanciaId);           // instancia del vuelo
+                pa.setProductoId(prod.getId());               // ID del producto dentro del pedido
+                pa.setPedidoId(pedido.getId());     // ID del pedido
+                pa.setInstanciaVuelo(instancia);           // instancia del vuelo
                 pa.setIndiceEnRuta(tramo.getIndiceEnRuta());   // posición dentro de la ruta
-                pa.setHoraSalidaReal(tramo.getHoraSalidaReal());
-                pa.setHoraLlegadaReal(tramo.getHoraLlegadaReal());
                 pa.setEstadoProducto(EstadoProducto.PLANIFICADO);
 
                 // Lo guardas en cache con clave compuesta
-                String clave = instanciaId + "-" + productoIndex;
+                String clave = instanciaId + "-" + prod.getId();
 
                 assignmentCache.put(clave, pa);
             }
@@ -2770,11 +2763,10 @@ public class ALNSSolver2 implements CapacidadInstanciasManager {
             for (TramoConTiempo seg : tiempos.getTramos()) {
                 String idInstancia = buildInstanciaVueloId(seg.getVuelo(),seg.getHoraSalidaReal(),seg.getHoraLlegadaReal());
                 InstanciaVuelo inst = instanciaCache.get(idInstancia);
-
-                utilizacionCapacidadTotal +=
-                        (double) inst.getCapacidadUsada() / inst.getCapacidadMaxima();
-
-                totalInstanciasUsadas++;
+                if(inst != null){
+                    utilizacionCapacidadTotal += (double) inst.getCapacidadUsada() / inst.getCapacidadMaxima();
+                    totalInstanciasUsadas++;
+                }
             }
 
             // 4) Validar deadline real
@@ -3445,7 +3437,7 @@ public class ALNSSolver2 implements CapacidadInstanciasManager {
     private void limpiarProductAssignmentsPorInstanciaYPedido(String instanciaId, int pedidoId) {
         if (assignmentCache == null || instanciaId == null) return;
         assignmentCache.entrySet().removeIf(e ->
-                instanciaId.equals(e.getValue().getFlightInstanceId())
+                instanciaId.equals(e.getValue().getInstanciaVuelo().getIdInstancia())
                         && e.getValue().getPedidoId() != null
                         && e.getValue().getPedidoId() == pedidoId
         );

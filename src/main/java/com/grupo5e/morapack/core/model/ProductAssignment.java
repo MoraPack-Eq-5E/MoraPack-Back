@@ -27,13 +27,13 @@ public class ProductAssignment {
     @Column(nullable = false)
     private Integer pedidoId;
 
-    @Column(nullable = false)
-    private String flightInstanceId; // referencia a la instancia de vuelo
+    // CAMBIO CLAVE: Relación directa en lugar de solo String.
+    // Esto asegura integridad referencial en la BD.
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "flight_instance_id", nullable = false)
+    private InstanciaVuelo instanciaVuelo;
 
     private Integer indiceEnRuta; // posición en la secuencia de vuelos
-
-    private LocalDateTime horaSalidaReal;
-    private LocalDateTime horaLlegadaReal;
 
     @Enumerated(EnumType.STRING)
     private EstadoProducto estadoProducto; // EN_ALMACEN, EN_VUELO, ENTREGADO
